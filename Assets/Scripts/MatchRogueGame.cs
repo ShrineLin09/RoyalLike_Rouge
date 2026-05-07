@@ -159,7 +159,7 @@ namespace MatchRogue
             rect.sizeDelta = size;
 
             var text = go.AddComponent<Text>();
-            text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            text.font = GetRuntimeFont();
             text.fontSize = fontSize;
             text.alignment = anchor;
             text.color = new Color(0.96f, 0.94f, 0.88f);
@@ -196,7 +196,7 @@ namespace MatchRogue
             labelRect.offsetMax = new Vector2(-24f, -8f);
 
             var label = labelObject.AddComponent<Text>();
-            label.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            label.font = GetRuntimeFont();
             label.fontSize = 30;
             label.alignment = TextAnchor.MiddleCenter;
             label.color = new Color(0.98f, 0.96f, 0.90f);
@@ -625,6 +625,11 @@ namespace MatchRogue
         {
             var discount = GetUpgradeValue(UpgradeKind.TargetDiscount);
             return Mathf.Max(300, Mathf.RoundToInt(baseTargetScore * (1f - discount / 100f)));
+        }
+
+        private Font GetRuntimeFont()
+        {
+            return Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         }
 
         private Vector3 GridToWorld(int x, int y)
