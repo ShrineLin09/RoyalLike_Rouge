@@ -61,6 +61,7 @@ namespace MatchRogue
         private Vector3 boardOrigin;
         private int lastScreenWidth;
         private int lastScreenHeight;
+        private float lastClickTime;
 
         private void Awake()
         {
@@ -455,12 +456,20 @@ namespace MatchRogue
             var from = selected.Value;
             if (from == grid)
             {
+                if (IsSpecialTile(grid) && Time.unscaledTime - lastClickTime <= 0.32f)
+                {
+                    Deselect(from);
+                    TryActivateSpecialAt(grid);
+                    selected = null;
+                    return;
+                }
+
                 Deselect(from);
                 selected = null;
                 return;
             }
 
-            if (Mathf.Abs(from.x - grid.x) + Mathf.Abs(from.y - grid.y) == 1)
+            if (CanSwapTiles(from, grid))
             {
                 Deselect(from);
                 TrySwap(from, grid);
@@ -473,9 +482,20 @@ namespace MatchRogue
             }
         }
 
+        private bool CanSwapTiles(Vector2Int from, Vector2Int to)
+        {
+            if (Mathf.Abs(from.x - to.x) + Mathf.Abs(from.y - to.y) == 1)
+            {
+                return true;
+            }
+
+            return IsSpecialTile(from) || IsSpecialTile(to);
+        }
+
         private void Select(Vector2Int grid)
         {
             selected = grid;
+            lastClickTime = Time.unscaledTime;
             board[grid.x, grid.y].Object.transform.localScale = Vector3.one * (tileScale + 0.16f);
         }
 
@@ -490,7 +510,7 @@ namespace MatchRogue
         private void TrySwap(Vector2Int a, Vector2Int b)
         {
             SwapTiles(a, b);
-            if (TryResolveRainbowSwap(a, b))
+            if (TryResolveSpecialSwap(a, b))
             {
                 selected = null;
                 return;
@@ -507,6 +527,28 @@ namespace MatchRogue
             ResolveMatches(matches, GetPreferredSpecialSpawn(a, b, matches));
         }
 
+        private bool TryActivateSpecialAt(Vector2Int pos)
+        {
+            if (!IsSpecialTile(pos))
+            {
+                return false;
+            }
+
+            inputLocked = true;
+            comboChain++;
+            movesRemaining = Mathf.Max(0, movesRemaining - 1);
+
+            var clearSet = new HashSet<Vector2Int> { pos };
+            if (board[pos.x, pos.y].Special == SpecialKind.Rainbow)
+            {
+                AddTilesOfType(GetMostCommonTileType(), clearSet);
+            }
+
+            AwardScoreForClears(clearSet.Count);
+            ResolveClearSet(clearSet, null);
+            return true;
+        }
+
         private void SwapTiles(Vector2Int a, Vector2Int b)
         {
             (board[a.x, a.y], board[b.x, b.y]) = (board[b.x, b.y], board[a.x, a.y]);
@@ -514,7 +556,7 @@ namespace MatchRogue
             board[b.x, b.y].Object.transform.position = GridToWorld(b.x, b.y);
         }
 
-        private bool TryResolveRainbowSwap(Vector2Int a, Vector2Int b)
+        private bool TryResolveSpecialSwap(Vector2Int a, Vector2Int b)
         {
             var first = board[a.x, a.y];
             var second = board[b.x, b.y];
@@ -523,32 +565,145 @@ namespace MatchRogue
                 return false;
             }
 
-            if (first.Special != SpecialKind.Rainbow && second.Special != SpecialKind.Rainbow)
+            if (first.Special == SpecialKind.None && second.Special == SpecialKind.None)
             {
                 return false;
             }
 
-            var targetType = first.Special == SpecialKind.Rainbow ? second.Type : first.Type;
-            var clearSet = new HashSet<Vector2Int>();
+            inputLocked = true;
+            comboChain++;
+            movesRemaining = Mathf.Max(0, movesRemaining - 1);
+
+            if (first.Special != SpecialKind.None && second.Special != SpecialKind.None)
+            {
+                ResolveSpecialCombination(a, b, first.Special, second.Special);
+                return true;
+            }
+
+            var specialPos = first.Special != SpecialKind.None ? a : b;
+            var normalPos = first.Special != SpecialKind.None ? b : a;
+            var clearSet = new HashSet<Vector2Int> { specialPos };
+            if (board[specialPos.x, specialPos.y].Special == SpecialKind.Rainbow)
+            {
+                AddTilesOfType(board[normalPos.x, normalPos.y].Type, clearSet);
+            }
+
+            AwardScoreForClears(clearSet.Count);
+            ResolveClearSet(clearSet, null);
+            return true;
+        }
+
+        private void ResolveSpecialCombination(Vector2Int a, Vector2Int b, SpecialKind firstSpecial, SpecialKind secondSpecial)
+        {
+            var clearSet = new HashSet<Vector2Int> { a, b };
+            var firstIsRocket = IsRocket(firstSpecial);
+            var secondIsRocket = IsRocket(secondSpecial);
+
+            if (firstSpecial == SpecialKind.Rainbow && secondSpecial == SpecialKind.Rainbow)
+            {
+                AddEntireBoard(clearSet);
+                AwardScoreForClears(clearSet.Count);
+                ResolveClearSet(clearSet, null, false);
+                return;
+            }
+
+            if (firstSpecial == SpecialKind.Rainbow && firstSpecial != secondSpecial)
+            {
+                ResolveRainbowSpecialCombination(secondSpecial, clearSet);
+                return;
+            }
+
+            if (secondSpecial == SpecialKind.Rainbow && firstSpecial != secondSpecial)
+            {
+                ResolveRainbowSpecialCombination(firstSpecial, clearSet);
+                return;
+            }
+
+            if (firstIsRocket && secondIsRocket)
+            {
+                AddRow(a.y, clearSet);
+                AddColumn(a.x, clearSet);
+                AwardScoreForClears(clearSet.Count);
+                ResolveClearSet(clearSet, null, false);
+                return;
+            }
+
+            if (firstSpecial == SpecialKind.Bomb && secondSpecial == SpecialKind.Bomb)
+            {
+                AddRadius(a, 2, clearSet);
+                AddRadius(b, 2, clearSet);
+                AwardScoreForClears(clearSet.Count);
+                ResolveClearSet(clearSet, null, false);
+                return;
+            }
+
+            if ((firstIsRocket && secondSpecial == SpecialKind.Bomb) || (secondIsRocket && firstSpecial == SpecialKind.Bomb))
+            {
+                AddWideCross(a, clearSet);
+                AwardScoreForClears(clearSet.Count);
+                ResolveClearSet(clearSet, null, false);
+                return;
+            }
+
+            AwardScoreForClears(clearSet.Count);
+            ResolveClearSet(clearSet, null);
+        }
+
+        private void ResolveRainbowSpecialCombination(SpecialKind targetSpecial, HashSet<Vector2Int> clearSet)
+        {
+            var targetType = GetMostCommonTileType();
+            var positions = GetTilesOfType(targetType);
+            var specialToApply = IsRocket(targetSpecial)
+                ? (rng.Next(2) == 0 ? SpecialKind.LineHorizontal : SpecialKind.LineVertical)
+                : targetSpecial;
+
+            foreach (var pos in positions)
+            {
+                if (board[pos.x, pos.y] == null)
+                {
+                    continue;
+                }
+
+                board[pos.x, pos.y].Special = specialToApply;
+                DecorateTile(board[pos.x, pos.y]);
+                clearSet.Add(pos);
+            }
+
+            AwardScoreForClears(clearSet.Count);
+            ResolveClearSet(clearSet, null);
+        }
+
+        private int GetMostCommonTileType()
+        {
+            return Enumerable.Range(0, TileTypes)
+                .OrderByDescending(type => GetTilesOfType(type).Count)
+                .ThenBy(_ => rng.Next())
+                .First();
+        }
+
+        private List<Vector2Int> GetTilesOfType(int targetType)
+        {
+            var result = new List<Vector2Int>();
             for (var x = 0; x < Width; x++)
             {
                 for (var y = 0; y < Height; y++)
                 {
                     if (board[x, y] != null && board[x, y].Type == targetType)
                     {
-                        clearSet.Add(new Vector2Int(x, y));
+                        result.Add(new Vector2Int(x, y));
                     }
                 }
             }
 
-            clearSet.Add(a);
-            clearSet.Add(b);
-            inputLocked = true;
-            comboChain++;
-            movesRemaining = Mathf.Max(0, movesRemaining - 1);
-            AwardScoreForClears(clearSet.Count);
-            ResolveClearSet(clearSet, null);
-            return true;
+            return result;
+        }
+
+        private void AddTilesOfType(int targetType, HashSet<Vector2Int> output)
+        {
+            foreach (var pos in GetTilesOfType(targetType))
+            {
+                output.Add(pos);
+            }
         }
 
         private void ResolveMatches(List<MatchGroup> matchGroups, Vector2Int? specialSpawn)
@@ -571,11 +726,15 @@ namespace MatchRogue
             score += scoreGain;
         }
 
-        private void ResolveClearSet(HashSet<Vector2Int> baseClears, PendingSpecial? specialToCreate)
+        private void ResolveClearSet(HashSet<Vector2Int> baseClears, PendingSpecial? specialToCreate, bool expandSpecials = true)
         {
             var bombChance = GetUpgradeValue(UpgradeKind.BombChance);
             var bonusClears = new HashSet<Vector2Int>(baseClears);
-            ExpandSpecialClears(baseClears, bonusClears);
+            if (expandSpecials)
+            {
+                ExpandSpecialClears(baseClears, bonusClears);
+            }
+
             foreach (var pos in baseClears.ToArray())
             {
                 if (UnityEngine.Random.value * 100f < bombChance)
@@ -632,11 +791,58 @@ namespace MatchRogue
 
         private void AddNeighbors(Vector2Int center, HashSet<Vector2Int> output)
         {
-            for (var dx = -1; dx <= 1; dx++)
+            AddRadius(center, 1, output);
+        }
+
+        private void AddRadius(Vector2Int center, int radius, HashSet<Vector2Int> output)
+        {
+            for (var dx = -radius; dx <= radius; dx++)
             {
-                for (var dy = -1; dy <= 1; dy++)
+                for (var dy = -radius; dy <= radius; dy++)
                 {
-                    output.Add(new Vector2Int(center.x + dx, center.y + dy));
+                    var pos = new Vector2Int(center.x + dx, center.y + dy);
+                    if (IsInside(pos))
+                    {
+                        output.Add(pos);
+                    }
+                }
+            }
+        }
+
+        private void AddRow(int y, HashSet<Vector2Int> output)
+        {
+            for (var x = 0; x < Width; x++)
+            {
+                output.Add(new Vector2Int(x, y));
+            }
+        }
+
+        private void AddColumn(int x, HashSet<Vector2Int> output)
+        {
+            for (var y = 0; y < Height; y++)
+            {
+                output.Add(new Vector2Int(x, y));
+            }
+        }
+
+        private void AddWideCross(Vector2Int center, HashSet<Vector2Int> output)
+        {
+            for (var offset = -1; offset <= 1; offset++)
+            {
+                var row = Mathf.Clamp(center.y + offset, 0, Height - 1);
+                var column = Mathf.Clamp(center.x + offset, 0, Width - 1);
+                AddRow(row, output);
+                AddColumn(column, output);
+            }
+        }
+
+        private void AddEntireBoard(HashSet<Vector2Int> output)
+        {
+            for (var x = 0; x < Width; x++)
+            {
+                for (var y = 0; y < Height; y++)
+                {
+                    output.Add(new Vector2Int(x, y));
                 }
             }
         }
@@ -1075,6 +1281,16 @@ namespace MatchRogue
         private bool IsInside(Vector2Int pos)
         {
             return pos.x >= 0 && pos.x < Width && pos.y >= 0 && pos.y < Height;
+        }
+
+        private bool IsSpecialTile(Vector2Int pos)
+        {
+            return IsInside(pos) && board[pos.x, pos.y] != null && board[pos.x, pos.y].Special != SpecialKind.None;
+        }
+
+        private bool IsRocket(SpecialKind special)
+        {
+            return special == SpecialKind.LineHorizontal || special == SpecialKind.LineVertical;
         }
 
         private sealed class Tile
