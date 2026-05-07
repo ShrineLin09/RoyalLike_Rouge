@@ -957,8 +957,20 @@ namespace MatchRogue
                 $"{(isEndless ? "无尽挑战" : "原型闯关")}  第 {layer} 层 / 第 {room}/5 小关\n" +
                 $"分数 {score} / {targetScore}\n" +
                 $"剩余步数 {movesRemaining} / {roomMoveLimit}\n" +
-                $"已选强化：{(activeUpgrades.Count == 0 ? "无" : string.Join("、", activeUpgrades.Select(u => u.Name).Distinct()))}\n" +
+                $"已选强化：{FormatActiveUpgrades()}\n" +
                 "交换相邻棋子，在步数耗尽前达到目标分数。";
+        }
+
+        private string FormatActiveUpgrades()
+        {
+            if (activeUpgrades.Count == 0)
+            {
+                return "无";
+            }
+
+            return string.Join("、", activeUpgrades
+                .GroupBy(upgrade => upgrade.Name)
+                .Select(group => group.Count() > 1 ? $"{group.Key} x{group.Count()}" : group.Key));
         }
 
         private bool IsPointerOverUi()
