@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.UI;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 namespace MatchRogue
 {
@@ -70,9 +73,9 @@ namespace MatchRogue
                 FailRun();
             }
 
-            if (Input.GetMouseButtonDown(0))
+            if (TryGetPrimaryPressPosition(out var screenPosition))
             {
-                TrySelectTile();
+                TrySelectTile(screenPosition);
             }
 
             RefreshStatus();
@@ -299,9 +302,9 @@ namespace MatchRogue
             }
         }
 
-        private void TrySelectTile()
+        private void TrySelectTile(Vector2 screenPosition)
         {
-            var world = mainCamera.ScreenToWorldPoint(Input.mousePosition);
+            var world = mainCamera.ScreenToWorldPoint(screenPosition);
             var grid = WorldToGrid(world);
             if (!IsInside(grid))
             {
@@ -630,6 +633,35 @@ namespace MatchRogue
         private Font GetRuntimeFont()
         {
             return Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        }
+
+        private bool TryGetPrimaryPressPosition(out Vector2 screenPosition)
+        {
+#if ENABLE_INPUT_SYSTEM
+            if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
+            {
+                screenPosition = Mouse.current.position.ReadValue();
+                return true;
+            }
+
+            if (Touchscreen.current != null && Touchscreen.current.primaryTouch.press.wasPressedThisFrame)
+            {
+                screenPosition = Touchscreen.current.primaryTouch.position.ReadValue();
+                return true;
+            }
+
+            screenPosition = Vector2.zero;
+            return false;
+#else
+            if (Input.GetMouseButtonDown(0))
+            {
+                screenPosition = Input.mousePosition;
+                return true;
+            }
+
+            screenPosition = Vector2.zero;
+            return false;
+#endif
         }
 
         private Vector3 GridToWorld(int x, int y)
