@@ -272,6 +272,9 @@ namespace MatchRogue
 
         private void StartRoom()
         {
+            inputLocked = false;
+            selected = null;
+            RefreshBoardTransforms();
             score = 0;
             comboChain = 0;
             roomTimeLimit = Mathf.Max(50f, 92f - (layer - 1) * 3.5f - (room - 1) * 2f);
