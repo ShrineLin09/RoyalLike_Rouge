@@ -39,6 +39,10 @@ namespace MatchRogue
         private Button[] upgradeButtons;
         private Button restartButton;
         private Button endlessButton;
+        private Texture2D lineHorizontalIcon;
+        private Texture2D lineVerticalIcon;
+        private Texture2D bombIcon;
+        private Texture2D rainbowIcon;
 
         private Vector2Int? selected;
         private bool inputLocked;
@@ -99,10 +103,19 @@ namespace MatchRogue
             mainCamera.transform.position = new Vector3(0f, 0f, -10f);
             mainCamera.backgroundColor = new Color(0.10f, 0.09f, 0.13f);
 
+            LoadSpecialIcons();
             boardRoot = new GameObject("Board").transform;
             ConfigureCameraAndBoardLayout();
             BuildBackground();
             BuildUi();
+        }
+
+        private void LoadSpecialIcons()
+        {
+            lineHorizontalIcon = Resources.Load<Texture2D>("SpecialIcons/LineHorizontal");
+            lineVerticalIcon = Resources.Load<Texture2D>("SpecialIcons/LineVertical");
+            bombIcon = Resources.Load<Texture2D>("SpecialIcons/Bomb");
+            rainbowIcon = Resources.Load<Texture2D>("SpecialIcons/Rainbow");
         }
 
         private void ConfigureCameraAndBoardLayout()
@@ -346,23 +359,43 @@ namespace MatchRogue
             switch (tile.Special)
             {
                 case SpecialKind.LineHorizontal:
-                    AddTileMark(tile, "横向直线", Color.white, new Vector3(0.62f, 0.14f, 1f), Vector3.zero);
+                    AddTileIcon(tile, "LineHorizontalIcon", lineHorizontalIcon);
                     break;
                 case SpecialKind.LineVertical:
-                    AddTileMark(tile, "纵向直线", Color.white, new Vector3(0.14f, 0.62f, 1f), Vector3.zero);
+                    AddTileIcon(tile, "LineVerticalIcon", lineVerticalIcon);
                     break;
                 case SpecialKind.Bomb:
-                    AddTileMark(tile, "炸弹外圈", new Color(0.08f, 0.07f, 0.07f), new Vector3(0.52f, 0.52f, 1f), Vector3.zero);
-                    AddTileMark(tile, "炸弹内芯", new Color(1f, 0.92f, 0.18f), new Vector3(0.26f, 0.26f, 1f), new Vector3(0f, 0f, -0.01f));
+                    AddTileIcon(tile, "BombIcon", bombIcon);
                     break;
                 case SpecialKind.Rainbow:
-                    for (var i = 0; i < tileColors.Length; i++)
-                    {
-                        var y = -0.28f + i * 0.112f;
-                        AddTileMark(tile, $"彩虹{i}", tileColors[i], new Vector3(0.62f, 0.08f, 1f), new Vector3(0f, y, -0.01f - i * 0.001f));
-                    }
+                    AddTileIcon(tile, "RainbowIcon", rainbowIcon);
                     break;
             }
+        }
+
+        private void AddTileIcon(Tile tile, string name, Texture2D icon)
+        {
+            if (icon == null)
+            {
+                AddTileMark(tile, $"{name}Fallback", Color.white, new Vector3(0.58f, 0.58f, 1f), Vector3.zero);
+                return;
+            }
+
+            var mark = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            mark.name = name;
+            mark.transform.SetParent(tile.Object.transform);
+            mark.transform.localPosition = new Vector3(0f, 0f, -0.06f);
+            mark.transform.localScale = new Vector3(0.72f, 0.72f, 1f);
+            var collider = mark.GetComponent<Collider>();
+            if (collider != null)
+            {
+                Destroy(collider);
+            }
+
+            var renderer = mark.GetComponent<MeshRenderer>();
+            renderer.material = new Material(Shader.Find("Sprites/Default"));
+            renderer.material.mainTexture = icon;
+            renderer.material.color = Color.white;
         }
 
         private void AddTileMark(Tile tile, string name, Color color, Vector3 scale, Vector3 localPosition)
@@ -372,6 +405,12 @@ namespace MatchRogue
             mark.transform.SetParent(tile.Object.transform);
             mark.transform.localPosition = localPosition + new Vector3(0f, 0f, -0.05f);
             mark.transform.localScale = scale;
+            var collider = mark.GetComponent<Collider>();
+            if (collider != null)
+            {
+                Destroy(collider);
+            }
+
             var renderer = mark.GetComponent<MeshRenderer>();
             renderer.material = new Material(Shader.Find("Sprites/Default"));
             renderer.material.color = color;
