@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
@@ -34,12 +35,14 @@ namespace MatchRogue
         private Canvas canvas;
         private Text statusText;
         private Text upgradeText;
+        private RectTransform statusRect;
         private Button[] upgradeButtons;
         private Button restartButton;
         private Button endlessButton;
 
         private Vector2Int? selected;
         private bool inputLocked;
+        private bool upgradePanelOpen;
         private bool isEndless;
         private int layer = 1;
         private int room = 1;
@@ -156,15 +159,20 @@ namespace MatchRogue
             canvasObject.AddComponent<CanvasScaler>().uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             canvasObject.GetComponent<CanvasScaler>().referenceResolution = new Vector2(1080f, 1920f);
             canvasObject.AddComponent<GraphicRaycaster>();
+            EnsureEventSystem();
 
-            statusText = CreateText("Status", new Vector2(40f, -82f), new Vector2(1000f, 260f), 32, TextAnchor.UpperLeft);
-            upgradeText = CreateText("UpgradeTitle", new Vector2(0f, 520f), new Vector2(1000f, 120f), 42, TextAnchor.MiddleCenter);
+            statusText = CreateText("Status", new Vector2(32f, -132f), new Vector2(760f, 250f), 28, TextAnchor.UpperLeft);
+            statusRect = statusText.GetComponent<RectTransform>();
+            statusRect.anchorMin = new Vector2(0f, 1f);
+            statusRect.anchorMax = new Vector2(0f, 1f);
+            statusRect.pivot = new Vector2(0f, 1f);
+            upgradeText = CreateText("UpgradeTitle", new Vector2(0f, -430f), new Vector2(1000f, 120f), 40, TextAnchor.MiddleCenter);
             upgradeText.text = "";
 
             upgradeButtons = new Button[3];
             for (var i = 0; i < upgradeButtons.Length; i++)
             {
-                upgradeButtons[i] = CreateButton($"Upgrade {i + 1}", new Vector2(0f, 360f - i * 150f), new Vector2(860f, 110f));
+                upgradeButtons[i] = CreateButton($"Upgrade {i + 1}", new Vector2(0f, 120f - i * 140f), new Vector2(860f, 108f));
             }
 
             restartButton = CreateButton("Restart", new Vector2(-230f, -790f), new Vector2(360f, 90f));
@@ -178,6 +186,18 @@ namespace MatchRogue
             SetUpgradePanel(false);
         }
 
+        private void EnsureEventSystem()
+        {
+            if (FindObjectOfType<EventSystem>() != null)
+            {
+                return;
+            }
+
+            var eventSystemObject = new GameObject("EventSystem");
+            eventSystemObject.AddComponent<EventSystem>();
+            eventSystemObject.AddComponent<StandaloneInputModule>();
+        }
+
         private Text CreateText(string name, Vector2 anchoredPosition, Vector2 size, int fontSize, TextAnchor anchor)
         {
             var go = new GameObject(name);
@@ -185,6 +205,7 @@ namespace MatchRogue
             var rect = go.AddComponent<RectTransform>();
             rect.anchorMin = new Vector2(0.5f, 1f);
             rect.anchorMax = new Vector2(0.5f, 1f);
+            rect.pivot = new Vector2(0.5f, 1f);
             rect.anchoredPosition = anchoredPosition;
             rect.sizeDelta = size;
 
@@ -205,6 +226,7 @@ namespace MatchRogue
             var rect = go.AddComponent<RectTransform>();
             rect.anchorMin = new Vector2(0.5f, 0.5f);
             rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
             rect.anchoredPosition = anchoredPosition;
             rect.sizeDelta = size;
 
@@ -331,6 +353,11 @@ namespace MatchRogue
 
         private void TrySelectTile(Vector2 screenPosition)
         {
+            if (IsPointerOverUi())
+            {
+                return;
+            }
+
             var world = mainCamera.ScreenToWorldPoint(screenPosition);
             var grid = WorldToGrid(world);
             if (!IsInside(grid))
@@ -613,6 +640,7 @@ namespace MatchRogue
         private void SetUpgradePanel(bool visible)
         {
             upgradeText.gameObject.SetActive(visible);
+            upgradePanelOpen = visible;
             foreach (var button in upgradeButtons)
             {
                 button.gameObject.SetActive(visible);
@@ -649,6 +677,11 @@ namespace MatchRogue
                 $"剩余时间 {Mathf.CeilToInt(timeRemaining)} 秒\n" +
                 $"已选强化：{(activeUpgrades.Count == 0 ? "无" : string.Join("、", activeUpgrades.Select(u => u.Name).Distinct()))}\n" +
                 "交换相邻棋子，在时间耗尽前达到目标分数。";
+        }
+
+        private bool IsPointerOverUi()
+        {
+            return upgradePanelOpen || EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
         }
 
         private int GetAdjustedTargetScore()
