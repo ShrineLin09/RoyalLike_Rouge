@@ -1,4 +1,7 @@
-# Match Rogue Prototype
+<<<<<<< HEAD
+# RoyalLike_Rouge
+
+三消肉鸽游戏雏形。
 
 Unity 2022.3.62f2c1 prototype for a match-3 roguelite core loop.
 
@@ -19,3 +22,7 @@ Main scene:
 
 `Assets/Scenes/Prototype.unity`
 
+=======
+# RoyalLike_Rouge
+三消肉鸽游戏雏形
+>>>>>>> origin/main
