@@ -3,22 +3,22 @@
 
 三消肉鸽游戏雏形。
 
-Unity 2022.3.62f2c1 prototype for a match-3 roguelite core loop.
+Unity 2022.3.62f2c1 三消轻肉鸽核心循环原型。
 
-## Prototype Scope
+## 原型范围
 
-- 8x8 match-3 board with adjacent swaps.
-- Match detection, clear, gravity, refill, and score.
-- Five rooms per layer.
-- After each completed room, choose one of three roguelite upgrades.
-- Endless challenge scales target score and timer pressure by layer.
-- Minimal runtime-generated UI and tile visuals, no external art dependency.
+- 8x8 三消棋盘，支持相邻棋子交换。
+- 支持匹配检测、消除、掉落、补充和计分。
+- 每层 5 个小关。
+- 每完成一个小关，从 3 个轻肉鸽强化中选择 1 个。
+- 无尽挑战会随层数提升目标分数和时间压力。
+- UI 和棋子视觉均运行时生成，不依赖外部美术资源。
 
-## Open
+## 打开方式
 
-Open this folder with Unity `2022.3.62f2c1`.
+使用 Unity `2022.3.62f2c1` 打开本目录。
 
-Main scene:
+主场景：
 
 `Assets/Scenes/Prototype.unity`
 

@@ -141,11 +141,11 @@ namespace MatchRogue
             }
 
             restartButton = CreateButton("Restart", new Vector2(-230f, -790f), new Vector2(360f, 90f));
-            restartButton.GetComponentInChildren<Text>().text = "Restart Run";
+            restartButton.GetComponentInChildren<Text>().text = "重新开始";
             restartButton.onClick.AddListener(() => StartRun(isEndless));
 
             endlessButton = CreateButton("Endless", new Vector2(230f, -790f), new Vector2(360f, 90f));
-            endlessButton.GetComponentInChildren<Text>().text = "Start Endless";
+            endlessButton.GetComponentInChildren<Text>().text = "开始无尽";
             endlessButton.onClick.AddListener(() => StartRun(true));
 
             SetUpgradePanel(false);
@@ -216,7 +216,7 @@ namespace MatchRogue
             activeUpgrades.Clear();
             selected = null;
             inputLocked = false;
-            endlessButton.GetComponentInChildren<Text>().text = isEndless ? "Endless On" : "Start Endless";
+            endlessButton.GetComponentInChildren<Text>().text = isEndless ? "无尽模式" : "开始无尽";
             GenerateBoard();
             StartRoom();
         }
@@ -547,8 +547,8 @@ namespace MatchRogue
         private void ShowUpgradeChoices()
         {
             upgradeText.text = isEndless
-                ? $"Layer {layer} reward"
-                : room == 1 ? $"Next big level reward" : $"Room {room - 1} cleared";
+                ? $"第 {layer} 层奖励"
+                : room == 1 ? "进入下一大关" : $"第 {room - 1} 小关完成";
 
             var choices = RollUpgradeChoices();
             for (var i = 0; i < upgradeButtons.Length; i++)
@@ -572,12 +572,12 @@ namespace MatchRogue
         {
             var pool = new[]
             {
-                new RogueUpgrade(UpgradeKind.ScorePercent, "Combo Fever", "Score from clears +20%.", 20f),
-                new RogueUpgrade(UpgradeKind.BombChance, "Spark Tiles", "Matched tiles have 8% chance to clear neighbors.", 8f),
-                new RogueUpgrade(UpgradeKind.ExtraTime, "Calm Start", "Each room starts with +10 seconds.", 10f),
-                new RogueUpgrade(UpgradeKind.TargetDiscount, "Soft Target", "Future room target scores -8%.", 8f),
-                new RogueUpgrade(UpgradeKind.ScorePercent, "Bigger Chains", "Score from clears +35%.", 35f),
-                new RogueUpgrade(UpgradeKind.BombChance, "Hot Board", "Matched tiles have 14% chance to clear neighbors.", 14f)
+                new RogueUpgrade(UpgradeKind.ScorePercent, "连消狂热", "消除得分 +20%。", 20f),
+                new RogueUpgrade(UpgradeKind.BombChance, "火花棋子", "被消除的棋子有 8% 概率清除周围格子。", 8f),
+                new RogueUpgrade(UpgradeKind.ExtraTime, "从容开局", "每个小关初始时间 +10 秒。", 10f),
+                new RogueUpgrade(UpgradeKind.TargetDiscount, "目标减压", "后续小关目标分数 -8%。", 8f),
+                new RogueUpgrade(UpgradeKind.ScorePercent, "巨型连锁", "消除得分 +35%。", 35f),
+                new RogueUpgrade(UpgradeKind.BombChance, "炽热棋盘", "被消除的棋子有 14% 概率清除周围格子。", 14f)
             };
 
             return pool.OrderBy(_ => rng.Next()).Take(3).ToArray();
@@ -609,19 +609,19 @@ namespace MatchRogue
             SetUpgradePanel(false);
             upgradeText.gameObject.SetActive(true);
             upgradeText.text = isEndless
-                ? $"Run ended at Layer {layer}, Room {room}"
-                : $"Room failed. Try the run again.";
+                ? $"挑战结束：第 {layer} 层，第 {room} 小关"
+                : "小关失败，再试一次。";
         }
 
         private void RefreshStatus()
         {
             targetScore = GetAdjustedTargetScore();
             statusText.text =
-                $"{(isEndless ? "Endless" : "Prototype Run")}  Layer {layer} / Room {room}/5\n" +
-                $"Score {score} / {targetScore}\n" +
-                $"Time {Mathf.CeilToInt(timeRemaining)}s\n" +
-                $"Upgrades: {(activeUpgrades.Count == 0 ? "None" : string.Join(", ", activeUpgrades.Select(u => u.Name).Distinct()))}\n" +
-                "Swap adjacent tiles. Clear enough score before time runs out.";
+                $"{(isEndless ? "无尽挑战" : "原型闯关")}  第 {layer} 层 / 第 {room}/5 小关\n" +
+                $"分数 {score} / {targetScore}\n" +
+                $"剩余时间 {Mathf.CeilToInt(timeRemaining)} 秒\n" +
+                $"已选强化：{(activeUpgrades.Count == 0 ? "无" : string.Join("、", activeUpgrades.Select(u => u.Name).Distinct()))}\n" +
+                "交换相邻棋子，在时间耗尽前达到目标分数。";
         }
 
         private int GetAdjustedTargetScore()
