@@ -1,0 +1,682 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace MatchRogue
+{
+    public sealed class MatchRogueGame : MonoBehaviour
+    {
+        private const int Width = 8;
+        private const int Height = 8;
+        private const int TileTypes = 6;
+
+        private readonly Color[] tileColors =
+        {
+            new Color(0.95f, 0.22f, 0.26f),
+            new Color(0.20f, 0.55f, 1.00f),
+            new Color(0.21f, 0.78f, 0.36f),
+            new Color(1.00f, 0.78f, 0.12f),
+            new Color(0.67f, 0.33f, 0.95f),
+            new Color(1.00f, 0.48f, 0.16f)
+        };
+
+        private readonly Tile[,] board = new Tile[Width, Height];
+        private readonly List<RogueUpgrade> activeUpgrades = new List<RogueUpgrade>();
+        private readonly System.Random rng = new System.Random();
+
+        private Camera mainCamera;
+        private Transform boardRoot;
+        private Canvas canvas;
+        private Text statusText;
+        private Text upgradeText;
+        private Button[] upgradeButtons;
+        private Button restartButton;
+        private Button endlessButton;
+
+        private Vector2Int? selected;
+        private bool inputLocked;
+        private bool isEndless;
+        private int layer = 1;
+        private int room = 1;
+        private int score;
+        private int baseTargetScore;
+        private int targetScore;
+        private float timeRemaining;
+        private float roomTimeLimit;
+        private int comboChain;
+
+        private float TileSpacing => 1.05f;
+        private Vector3 BoardOrigin => new Vector3(-3.65f, -3.5f, 0f);
+
+        private void Awake()
+        {
+            BuildScene();
+            StartRun(false);
+        }
+
+        private void Update()
+        {
+            if (inputLocked)
+            {
+                return;
+            }
+
+            timeRemaining -= Time.deltaTime;
+            if (timeRemaining <= 0f)
+            {
+                timeRemaining = 0f;
+                FailRun();
+            }
+
+            if (Input.GetMouseButtonDown(0))
+            {
+                TrySelectTile();
+            }
+
+            RefreshStatus();
+        }
+
+        private void BuildScene()
+        {
+            mainCamera = Camera.main;
+            if (mainCamera == null)
+            {
+                var cameraObject = new GameObject("Main Camera");
+                mainCamera = cameraObject.AddComponent<Camera>();
+                cameraObject.tag = "MainCamera";
+            }
+
+            mainCamera.orthographic = true;
+            mainCamera.orthographicSize = 6.4f;
+            mainCamera.transform.position = new Vector3(0f, 0f, -10f);
+            mainCamera.backgroundColor = new Color(0.10f, 0.09f, 0.13f);
+
+            boardRoot = new GameObject("Board").transform;
+            BuildBackground();
+            BuildUi();
+        }
+
+        private void BuildBackground()
+        {
+            for (var x = 0; x < Width; x++)
+            {
+                for (var y = 0; y < Height; y++)
+                {
+                    var cell = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                    cell.name = $"Cell {x},{y}";
+                    cell.transform.SetParent(boardRoot);
+                    cell.transform.position = GridToWorld(x, y) + new Vector3(0f, 0f, 0.2f);
+                    cell.transform.localScale = Vector3.one * 0.98f;
+                    var renderer = cell.GetComponent<MeshRenderer>();
+                    renderer.material = new Material(Shader.Find("Sprites/Default"));
+                    renderer.material.color = (x + y) % 2 == 0
+                        ? new Color(0.18f, 0.17f, 0.23f)
+                        : new Color(0.14f, 0.13f, 0.18f);
+                }
+            }
+        }
+
+        private void BuildUi()
+        {
+            var canvasObject = new GameObject("Canvas");
+            canvas = canvasObject.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvasObject.AddComponent<CanvasScaler>().uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            canvasObject.GetComponent<CanvasScaler>().referenceResolution = new Vector2(1080f, 1920f);
+            canvasObject.AddComponent<GraphicRaycaster>();
+
+            statusText = CreateText("Status", new Vector2(40f, -40f), new Vector2(1000f, 240f), 38, TextAnchor.UpperLeft);
+            upgradeText = CreateText("UpgradeTitle", new Vector2(0f, 520f), new Vector2(1000f, 120f), 42, TextAnchor.MiddleCenter);
+            upgradeText.text = "";
+
+            upgradeButtons = new Button[3];
+            for (var i = 0; i < upgradeButtons.Length; i++)
+            {
+                upgradeButtons[i] = CreateButton($"Upgrade {i + 1}", new Vector2(0f, 360f - i * 150f), new Vector2(860f, 110f));
+            }
+
+            restartButton = CreateButton("Restart", new Vector2(-230f, -790f), new Vector2(360f, 90f));
+            restartButton.GetComponentInChildren<Text>().text = "Restart Run";
+            restartButton.onClick.AddListener(() => StartRun(isEndless));
+
+            endlessButton = CreateButton("Endless", new Vector2(230f, -790f), new Vector2(360f, 90f));
+            endlessButton.GetComponentInChildren<Text>().text = "Start Endless";
+            endlessButton.onClick.AddListener(() => StartRun(true));
+
+            SetUpgradePanel(false);
+        }
+
+        private Text CreateText(string name, Vector2 anchoredPosition, Vector2 size, int fontSize, TextAnchor anchor)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(canvas.transform);
+            var rect = go.AddComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 1f);
+            rect.anchorMax = new Vector2(0.5f, 1f);
+            rect.anchoredPosition = anchoredPosition;
+            rect.sizeDelta = size;
+
+            var text = go.AddComponent<Text>();
+            text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            text.fontSize = fontSize;
+            text.alignment = anchor;
+            text.color = new Color(0.96f, 0.94f, 0.88f);
+            text.horizontalOverflow = HorizontalWrapMode.Wrap;
+            text.verticalOverflow = VerticalWrapMode.Overflow;
+            return text;
+        }
+
+        private Button CreateButton(string name, Vector2 anchoredPosition, Vector2 size)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(canvas.transform);
+            var rect = go.AddComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = anchoredPosition;
+            rect.sizeDelta = size;
+
+            var image = go.AddComponent<Image>();
+            image.color = new Color(0.22f, 0.20f, 0.29f, 0.95f);
+
+            var button = go.AddComponent<Button>();
+            var colors = button.colors;
+            colors.highlightedColor = new Color(0.34f, 0.30f, 0.45f);
+            colors.pressedColor = new Color(0.14f, 0.12f, 0.20f);
+            button.colors = colors;
+
+            var labelObject = new GameObject("Label");
+            labelObject.transform.SetParent(go.transform);
+            var labelRect = labelObject.AddComponent<RectTransform>();
+            labelRect.anchorMin = Vector2.zero;
+            labelRect.anchorMax = Vector2.one;
+            labelRect.offsetMin = new Vector2(24f, 8f);
+            labelRect.offsetMax = new Vector2(-24f, -8f);
+
+            var label = labelObject.AddComponent<Text>();
+            label.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            label.fontSize = 30;
+            label.alignment = TextAnchor.MiddleCenter;
+            label.color = new Color(0.98f, 0.96f, 0.90f);
+            label.horizontalOverflow = HorizontalWrapMode.Wrap;
+            label.verticalOverflow = VerticalWrapMode.Truncate;
+            return button;
+        }
+
+        private void StartRun(bool endless)
+        {
+            isEndless = endless;
+            layer = 1;
+            room = 1;
+            activeUpgrades.Clear();
+            selected = null;
+            inputLocked = false;
+            endlessButton.GetComponentInChildren<Text>().text = isEndless ? "Endless On" : "Start Endless";
+            GenerateBoard();
+            StartRoom();
+        }
+
+        private void StartRoom()
+        {
+            score = 0;
+            comboChain = 0;
+            roomTimeLimit = Mathf.Max(50f, 92f - (layer - 1) * 3.5f - (room - 1) * 2f);
+            roomTimeLimit += GetUpgradeValue(UpgradeKind.ExtraTime);
+            timeRemaining = roomTimeLimit;
+            baseTargetScore = Mathf.RoundToInt((950 + room * 170 + layer * 260) * GetDifficultyMultiplier());
+            targetScore = GetAdjustedTargetScore();
+            SetUpgradePanel(false);
+            RefreshStatus();
+        }
+
+        private float GetDifficultyMultiplier()
+        {
+            return 1f + (layer - 1) * 0.18f + (room - 1) * 0.06f;
+        }
+
+        private void GenerateBoard()
+        {
+            ClearTiles();
+
+            for (var x = 0; x < Width; x++)
+            {
+                for (var y = 0; y < Height; y++)
+                {
+                    var type = RollTileTypeAvoidingMatch(x, y);
+                    board[x, y] = CreateTile(x, y, type);
+                }
+            }
+        }
+
+        private int RollTileTypeAvoidingMatch(int x, int y)
+        {
+            for (var attempts = 0; attempts < 20; attempts++)
+            {
+                var type = rng.Next(TileTypes);
+                var horizontal = x >= 2 && board[x - 1, y] != null && board[x - 2, y] != null &&
+                                 board[x - 1, y].Type == type && board[x - 2, y].Type == type;
+                var vertical = y >= 2 && board[x, y - 1] != null && board[x, y - 2] != null &&
+                               board[x, y - 1].Type == type && board[x, y - 2].Type == type;
+                if (!horizontal && !vertical)
+                {
+                    return type;
+                }
+            }
+
+            return rng.Next(TileTypes);
+        }
+
+        private Tile CreateTile(int x, int y, int type)
+        {
+            var go = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            go.name = $"Tile {x},{y}";
+            go.transform.SetParent(boardRoot);
+            go.transform.position = GridToWorld(x, y);
+            go.transform.localScale = Vector3.one * 0.84f;
+
+            var renderer = go.GetComponent<MeshRenderer>();
+            renderer.material = new Material(Shader.Find("Sprites/Default"));
+            renderer.material.color = tileColors[type];
+
+            return new Tile(type, go);
+        }
+
+        private void ClearTiles()
+        {
+            for (var x = 0; x < Width; x++)
+            {
+                for (var y = 0; y < Height; y++)
+                {
+                    if (board[x, y]?.Object != null)
+                    {
+                        Destroy(board[x, y].Object);
+                    }
+
+                    board[x, y] = null;
+                }
+            }
+        }
+
+        private void TrySelectTile()
+        {
+            var world = mainCamera.ScreenToWorldPoint(Input.mousePosition);
+            var grid = WorldToGrid(world);
+            if (!IsInside(grid))
+            {
+                return;
+            }
+
+            if (!selected.HasValue)
+            {
+                Select(grid);
+                return;
+            }
+
+            var from = selected.Value;
+            if (from == grid)
+            {
+                Deselect(from);
+                selected = null;
+                return;
+            }
+
+            if (Mathf.Abs(from.x - grid.x) + Mathf.Abs(from.y - grid.y) == 1)
+            {
+                Deselect(from);
+                TrySwap(from, grid);
+                selected = null;
+            }
+            else
+            {
+                Deselect(from);
+                Select(grid);
+            }
+        }
+
+        private void Select(Vector2Int grid)
+        {
+            selected = grid;
+            board[grid.x, grid.y].Object.transform.localScale = Vector3.one * 1.02f;
+        }
+
+        private void Deselect(Vector2Int grid)
+        {
+            if (IsInside(grid) && board[grid.x, grid.y] != null)
+            {
+                board[grid.x, grid.y].Object.transform.localScale = Vector3.one * 0.84f;
+            }
+        }
+
+        private void TrySwap(Vector2Int a, Vector2Int b)
+        {
+            SwapTiles(a, b);
+            var matches = FindMatches();
+            if (matches.Count == 0)
+            {
+                SwapTiles(a, b);
+                return;
+            }
+
+            ResolveMatches(matches);
+        }
+
+        private void SwapTiles(Vector2Int a, Vector2Int b)
+        {
+            (board[a.x, a.y], board[b.x, b.y]) = (board[b.x, b.y], board[a.x, a.y]);
+            board[a.x, a.y].Object.transform.position = GridToWorld(a.x, a.y);
+            board[b.x, b.y].Object.transform.position = GridToWorld(b.x, b.y);
+        }
+
+        private void ResolveMatches(HashSet<Vector2Int> matches)
+        {
+            inputLocked = true;
+            comboChain++;
+
+            var scoreGain = matches.Count * 80;
+            scoreGain += Mathf.RoundToInt(scoreGain * GetUpgradeValue(UpgradeKind.ScorePercent) / 100f);
+            scoreGain += comboChain > 1 ? comboChain * 40 : 0;
+            score += scoreGain;
+
+            var bombChance = GetUpgradeValue(UpgradeKind.BombChance);
+            var bonusClears = new HashSet<Vector2Int>(matches);
+            foreach (var pos in matches.ToArray())
+            {
+                if (UnityEngine.Random.value * 100f < bombChance)
+                {
+                    AddNeighbors(pos, bonusClears);
+                }
+            }
+
+            foreach (var pos in bonusClears)
+            {
+                if (!IsInside(pos) || board[pos.x, pos.y] == null)
+                {
+                    continue;
+                }
+
+                Destroy(board[pos.x, pos.y].Object);
+                board[pos.x, pos.y] = null;
+            }
+
+            ApplyGravity();
+            RefillBoard();
+
+            var cascades = FindMatches();
+            if (cascades.Count > 0)
+            {
+                ResolveMatches(cascades);
+                return;
+            }
+
+            comboChain = 0;
+            inputLocked = false;
+
+            if (score >= targetScore)
+            {
+                CompleteRoom();
+            }
+        }
+
+        private void AddNeighbors(Vector2Int center, HashSet<Vector2Int> output)
+        {
+            for (var dx = -1; dx <= 1; dx++)
+            {
+                for (var dy = -1; dy <= 1; dy++)
+                {
+                    output.Add(new Vector2Int(center.x + dx, center.y + dy));
+                }
+            }
+        }
+
+        private HashSet<Vector2Int> FindMatches()
+        {
+            var result = new HashSet<Vector2Int>();
+
+            for (var y = 0; y < Height; y++)
+            {
+                var runStart = 0;
+                for (var x = 1; x <= Width; x++)
+                {
+                    var same = x < Width && board[x, y] != null && board[runStart, y] != null &&
+                               board[x, y].Type == board[runStart, y].Type;
+                    if (same)
+                    {
+                        continue;
+                    }
+
+                    var runLength = x - runStart;
+                    if (runLength >= 3)
+                    {
+                        for (var i = runStart; i < x; i++)
+                        {
+                            result.Add(new Vector2Int(i, y));
+                        }
+                    }
+
+                    runStart = x;
+                }
+            }
+
+            for (var x = 0; x < Width; x++)
+            {
+                var runStart = 0;
+                for (var y = 1; y <= Height; y++)
+                {
+                    var same = y < Height && board[x, y] != null && board[x, runStart] != null &&
+                               board[x, y].Type == board[x, runStart].Type;
+                    if (same)
+                    {
+                        continue;
+                    }
+
+                    var runLength = y - runStart;
+                    if (runLength >= 3)
+                    {
+                        for (var i = runStart; i < y; i++)
+                        {
+                            result.Add(new Vector2Int(x, i));
+                        }
+                    }
+
+                    runStart = y;
+                }
+            }
+
+            return result;
+        }
+
+        private void ApplyGravity()
+        {
+            for (var x = 0; x < Width; x++)
+            {
+                var writeY = 0;
+                for (var y = 0; y < Height; y++)
+                {
+                    if (board[x, y] == null)
+                    {
+                        continue;
+                    }
+
+                    if (writeY != y)
+                    {
+                        board[x, writeY] = board[x, y];
+                        board[x, y] = null;
+                        board[x, writeY].Object.transform.position = GridToWorld(x, writeY);
+                    }
+
+                    writeY++;
+                }
+            }
+        }
+
+        private void RefillBoard()
+        {
+            for (var x = 0; x < Width; x++)
+            {
+                for (var y = 0; y < Height; y++)
+                {
+                    if (board[x, y] == null)
+                    {
+                        board[x, y] = CreateTile(x, y, rng.Next(TileTypes));
+                    }
+                }
+            }
+        }
+
+        private void CompleteRoom()
+        {
+            inputLocked = true;
+            if (room >= 5)
+            {
+                layer++;
+                room = 1;
+            }
+            else
+            {
+                room++;
+            }
+
+            ShowUpgradeChoices();
+        }
+
+        private void ShowUpgradeChoices()
+        {
+            upgradeText.text = isEndless
+                ? $"Layer {layer} reward"
+                : room == 1 ? $"Next big level reward" : $"Room {room - 1} cleared";
+
+            var choices = RollUpgradeChoices();
+            for (var i = 0; i < upgradeButtons.Length; i++)
+            {
+                var index = i;
+                var upgrade = choices[i];
+                var button = upgradeButtons[i];
+                button.GetComponentInChildren<Text>().text = $"{upgrade.Name}\n{upgrade.Description}";
+                button.onClick.RemoveAllListeners();
+                button.onClick.AddListener(() =>
+                {
+                    activeUpgrades.Add(upgrade);
+                    StartRoom();
+                });
+            }
+
+            SetUpgradePanel(true);
+        }
+
+        private RogueUpgrade[] RollUpgradeChoices()
+        {
+            var pool = new[]
+            {
+                new RogueUpgrade(UpgradeKind.ScorePercent, "Combo Fever", "Score from clears +20%.", 20f),
+                new RogueUpgrade(UpgradeKind.BombChance, "Spark Tiles", "Matched tiles have 8% chance to clear neighbors.", 8f),
+                new RogueUpgrade(UpgradeKind.ExtraTime, "Calm Start", "Each room starts with +10 seconds.", 10f),
+                new RogueUpgrade(UpgradeKind.TargetDiscount, "Soft Target", "Future room target scores -8%.", 8f),
+                new RogueUpgrade(UpgradeKind.ScorePercent, "Bigger Chains", "Score from clears +35%.", 35f),
+                new RogueUpgrade(UpgradeKind.BombChance, "Hot Board", "Matched tiles have 14% chance to clear neighbors.", 14f)
+            };
+
+            return pool.OrderBy(_ => rng.Next()).Take(3).ToArray();
+        }
+
+        private void SetUpgradePanel(bool visible)
+        {
+            upgradeText.gameObject.SetActive(visible);
+            foreach (var button in upgradeButtons)
+            {
+                button.gameObject.SetActive(visible);
+            }
+        }
+
+        private float GetUpgradeValue(UpgradeKind kind)
+        {
+            var total = activeUpgrades.Where(upgrade => upgrade.Kind == kind).Sum(upgrade => upgrade.Value);
+            if (kind == UpgradeKind.TargetDiscount)
+            {
+                return Mathf.Clamp(total, 0f, 50f);
+            }
+
+            return total;
+        }
+
+        private void FailRun()
+        {
+            inputLocked = true;
+            SetUpgradePanel(false);
+            upgradeText.gameObject.SetActive(true);
+            upgradeText.text = isEndless
+                ? $"Run ended at Layer {layer}, Room {room}"
+                : $"Room failed. Try the run again.";
+        }
+
+        private void RefreshStatus()
+        {
+            targetScore = GetAdjustedTargetScore();
+            statusText.text =
+                $"{(isEndless ? "Endless" : "Prototype Run")}  Layer {layer} / Room {room}/5\n" +
+                $"Score {score} / {targetScore}\n" +
+                $"Time {Mathf.CeilToInt(timeRemaining)}s\n" +
+                $"Upgrades: {(activeUpgrades.Count == 0 ? "None" : string.Join(", ", activeUpgrades.Select(u => u.Name).Distinct()))}\n" +
+                "Swap adjacent tiles. Clear enough score before time runs out.";
+        }
+
+        private int GetAdjustedTargetScore()
+        {
+            var discount = GetUpgradeValue(UpgradeKind.TargetDiscount);
+            return Mathf.Max(300, Mathf.RoundToInt(baseTargetScore * (1f - discount / 100f)));
+        }
+
+        private Vector3 GridToWorld(int x, int y)
+        {
+            return BoardOrigin + new Vector3(x * TileSpacing, y * TileSpacing, 0f);
+        }
+
+        private Vector2Int WorldToGrid(Vector3 world)
+        {
+            var local = world - BoardOrigin;
+            return new Vector2Int(Mathf.RoundToInt(local.x / TileSpacing), Mathf.RoundToInt(local.y / TileSpacing));
+        }
+
+        private bool IsInside(Vector2Int pos)
+        {
+            return pos.x >= 0 && pos.x < Width && pos.y >= 0 && pos.y < Height;
+        }
+
+        private sealed class Tile
+        {
+            public Tile(int type, GameObject tileObject)
+            {
+                Type = type;
+                Object = tileObject;
+            }
+
+            public int Type { get; }
+            public GameObject Object { get; }
+        }
+
+        private readonly struct RogueUpgrade
+        {
+            public RogueUpgrade(UpgradeKind kind, string name, string description, float value)
+            {
+                Kind = kind;
+                Name = name;
+                Description = description;
+                Value = value;
+            }
+
+            public UpgradeKind Kind { get; }
+            public string Name { get; }
+            public string Description { get; }
+            public float Value { get; }
+        }
+
+        private enum UpgradeKind
+        {
+            ScorePercent,
+            BombChance,
+            ExtraTime,
+            TargetDiscount
+        }
+    }
+}
