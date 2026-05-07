@@ -49,8 +49,8 @@ namespace MatchRogue
         private int score;
         private int baseTargetScore;
         private int targetScore;
-        private float timeRemaining;
-        private float roomTimeLimit;
+        private int movesRemaining;
+        private int roomMoveLimit;
         private int comboChain;
         private float tileSpacing = 1f;
         private float tileScale = 0.82f;
@@ -75,13 +75,6 @@ namespace MatchRogue
             if (inputLocked)
             {
                 return;
-            }
-
-            timeRemaining -= Time.deltaTime;
-            if (timeRemaining <= 0f)
-            {
-                timeRemaining = 0f;
-                FailRun();
             }
 
             if (TryGetPrimaryPressPosition(out var screenPosition))
@@ -277,9 +270,9 @@ namespace MatchRogue
             RefreshBoardTransforms();
             score = 0;
             comboChain = 0;
-            roomTimeLimit = Mathf.Max(50f, 92f - (layer - 1) * 3.5f - (room - 1) * 2f);
-            roomTimeLimit += GetUpgradeValue(UpgradeKind.ExtraTime);
-            timeRemaining = roomTimeLimit;
+            roomMoveLimit = Mathf.Max(14, 24 - (layer - 1) - Mathf.FloorToInt((room - 1) * 0.5f));
+            roomMoveLimit += Mathf.RoundToInt(GetUpgradeValue(UpgradeKind.ExtraMoves));
+            movesRemaining = roomMoveLimit;
             baseTargetScore = Mathf.RoundToInt((950 + room * 170 + layer * 260) * GetDifficultyMultiplier());
             targetScore = GetAdjustedTargetScore();
             SetUpgradePanel(false);
@@ -419,6 +412,7 @@ namespace MatchRogue
                 return;
             }
 
+            movesRemaining = Mathf.Max(0, movesRemaining - 1);
             ResolveMatches(matches);
         }
 
@@ -476,6 +470,12 @@ namespace MatchRogue
             if (score >= targetScore)
             {
                 CompleteRoom();
+                return;
+            }
+
+            if (movesRemaining <= 0)
+            {
+                FailRun();
             }
         }
 
@@ -631,7 +631,7 @@ namespace MatchRogue
             {
                 new RogueUpgrade(UpgradeKind.ScorePercent, "连消狂热", "消除得分 +20%。", 20f),
                 new RogueUpgrade(UpgradeKind.BombChance, "火花棋子", "被消除的棋子有 8% 概率清除周围格子。", 8f),
-                new RogueUpgrade(UpgradeKind.ExtraTime, "从容开局", "每个小关初始时间 +10 秒。", 10f),
+                new RogueUpgrade(UpgradeKind.ExtraMoves, "从容开局", "每个小关初始步数 +3。", 3f),
                 new RogueUpgrade(UpgradeKind.TargetDiscount, "目标减压", "后续小关目标分数 -8%。", 8f),
                 new RogueUpgrade(UpgradeKind.ScorePercent, "巨型连锁", "消除得分 +35%。", 35f),
                 new RogueUpgrade(UpgradeKind.BombChance, "炽热棋盘", "被消除的棋子有 14% 概率清除周围格子。", 14f)
@@ -677,9 +677,9 @@ namespace MatchRogue
             statusText.text =
                 $"{(isEndless ? "无尽挑战" : "原型闯关")}  第 {layer} 层 / 第 {room}/5 小关\n" +
                 $"分数 {score} / {targetScore}\n" +
-                $"剩余时间 {Mathf.CeilToInt(timeRemaining)} 秒\n" +
+                $"剩余步数 {movesRemaining} / {roomMoveLimit}\n" +
                 $"已选强化：{(activeUpgrades.Count == 0 ? "无" : string.Join("、", activeUpgrades.Select(u => u.Name).Distinct()))}\n" +
-                "交换相邻棋子，在时间耗尽前达到目标分数。";
+                "交换相邻棋子，在步数耗尽前达到目标分数。";
         }
 
         private bool IsPointerOverUi()
@@ -818,7 +818,7 @@ namespace MatchRogue
         {
             ScorePercent,
             BombChance,
-            ExtraTime,
+            ExtraMoves,
             TargetDiscount
         }
     }
