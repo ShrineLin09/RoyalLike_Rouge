@@ -328,7 +328,53 @@ namespace MatchRogue
             renderer.material = new Material(Shader.Find("Sprites/Default"));
             renderer.material.color = tileColors[type];
 
-            return new Tile(type, go);
+            return new Tile(type, SpecialKind.None, go);
+        }
+
+        private void DecorateTile(Tile tile)
+        {
+            if (tile.Object == null)
+            {
+                return;
+            }
+
+            for (var i = tile.Object.transform.childCount - 1; i >= 0; i--)
+            {
+                Destroy(tile.Object.transform.GetChild(i).gameObject);
+            }
+
+            switch (tile.Special)
+            {
+                case SpecialKind.LineHorizontal:
+                    AddTileMark(tile, "横向直线", Color.white, new Vector3(0.62f, 0.14f, 1f), Vector3.zero);
+                    break;
+                case SpecialKind.LineVertical:
+                    AddTileMark(tile, "纵向直线", Color.white, new Vector3(0.14f, 0.62f, 1f), Vector3.zero);
+                    break;
+                case SpecialKind.Bomb:
+                    AddTileMark(tile, "炸弹外圈", new Color(0.08f, 0.07f, 0.07f), new Vector3(0.52f, 0.52f, 1f), Vector3.zero);
+                    AddTileMark(tile, "炸弹内芯", new Color(1f, 0.92f, 0.18f), new Vector3(0.26f, 0.26f, 1f), new Vector3(0f, 0f, -0.01f));
+                    break;
+                case SpecialKind.Rainbow:
+                    for (var i = 0; i < tileColors.Length; i++)
+                    {
+                        var y = -0.28f + i * 0.112f;
+                        AddTileMark(tile, $"彩虹{i}", tileColors[i], new Vector3(0.62f, 0.08f, 1f), new Vector3(0f, y, -0.01f - i * 0.001f));
+                    }
+                    break;
+            }
+        }
+
+        private void AddTileMark(Tile tile, string name, Color color, Vector3 scale, Vector3 localPosition)
+        {
+            var mark = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            mark.name = name;
+            mark.transform.SetParent(tile.Object.transform);
+            mark.transform.localPosition = localPosition + new Vector3(0f, 0f, -0.05f);
+            mark.transform.localScale = scale;
+            var renderer = mark.GetComponent<MeshRenderer>();
+            renderer.material = new Material(Shader.Find("Sprites/Default"));
+            renderer.material.color = color;
         }
 
         private void ClearTiles()
@@ -405,7 +451,13 @@ namespace MatchRogue
         private void TrySwap(Vector2Int a, Vector2Int b)
         {
             SwapTiles(a, b);
-            var matches = FindMatches();
+            if (TryResolveRainbowSwap(a, b))
+            {
+                selected = null;
+                return;
+            }
+
+            var matches = FindMatchGroups();
             if (matches.Count == 0)
             {
                 SwapTiles(a, b);
@@ -413,7 +465,7 @@ namespace MatchRogue
             }
 
             movesRemaining = Mathf.Max(0, movesRemaining - 1);
-            ResolveMatches(matches);
+            ResolveMatches(matches, GetPreferredSpecialSpawn(a, b, matches));
         }
 
         private void SwapTiles(Vector2Int a, Vector2Int b)
@@ -423,24 +475,79 @@ namespace MatchRogue
             board[b.x, b.y].Object.transform.position = GridToWorld(b.x, b.y);
         }
 
-        private void ResolveMatches(HashSet<Vector2Int> matches)
+        private bool TryResolveRainbowSwap(Vector2Int a, Vector2Int b)
+        {
+            var first = board[a.x, a.y];
+            var second = board[b.x, b.y];
+            if (first == null || second == null)
+            {
+                return false;
+            }
+
+            if (first.Special != SpecialKind.Rainbow && second.Special != SpecialKind.Rainbow)
+            {
+                return false;
+            }
+
+            var targetType = first.Special == SpecialKind.Rainbow ? second.Type : first.Type;
+            var clearSet = new HashSet<Vector2Int>();
+            for (var x = 0; x < Width; x++)
+            {
+                for (var y = 0; y < Height; y++)
+                {
+                    if (board[x, y] != null && board[x, y].Type == targetType)
+                    {
+                        clearSet.Add(new Vector2Int(x, y));
+                    }
+                }
+            }
+
+            clearSet.Add(a);
+            clearSet.Add(b);
+            inputLocked = true;
+            comboChain++;
+            movesRemaining = Mathf.Max(0, movesRemaining - 1);
+            AwardScoreForClears(clearSet.Count);
+            ResolveClearSet(clearSet, null);
+            return true;
+        }
+
+        private void ResolveMatches(List<MatchGroup> matchGroups, Vector2Int? specialSpawn)
         {
             inputLocked = true;
             comboChain++;
 
-            var scoreGain = matches.Count * 80;
+            var matchedPositions = new HashSet<Vector2Int>(matchGroups.SelectMany(group => group.Positions));
+            var specialToCreate = DetermineSpecialKind(matchGroups, specialSpawn);
+            AwardScoreForClears(matchedPositions.Count);
+
+            ResolveClearSet(matchedPositions, specialToCreate);
+        }
+
+        private void AwardScoreForClears(int clearCount)
+        {
+            var scoreGain = clearCount * 80;
             scoreGain += Mathf.RoundToInt(scoreGain * GetUpgradeValue(UpgradeKind.ScorePercent) / 100f);
             scoreGain += comboChain > 1 ? comboChain * 40 : 0;
             score += scoreGain;
+        }
 
+        private void ResolveClearSet(HashSet<Vector2Int> baseClears, PendingSpecial? specialToCreate)
+        {
             var bombChance = GetUpgradeValue(UpgradeKind.BombChance);
-            var bonusClears = new HashSet<Vector2Int>(matches);
-            foreach (var pos in matches.ToArray())
+            var bonusClears = new HashSet<Vector2Int>(baseClears);
+            ExpandSpecialClears(baseClears, bonusClears);
+            foreach (var pos in baseClears.ToArray())
             {
                 if (UnityEngine.Random.value * 100f < bombChance)
                 {
                     AddNeighbors(pos, bonusClears);
                 }
+            }
+
+            if (specialToCreate.HasValue)
+            {
+                bonusClears.Remove(specialToCreate.Value.Position);
             }
 
             foreach (var pos in bonusClears)
@@ -454,13 +561,18 @@ namespace MatchRogue
                 board[pos.x, pos.y] = null;
             }
 
+            if (specialToCreate.HasValue)
+            {
+                CreateSpecialTileAt(specialToCreate.Value);
+            }
+
             ApplyGravity();
             RefillBoard();
 
-            var cascades = FindMatches();
+            var cascades = FindMatchGroups();
             if (cascades.Count > 0)
             {
-                ResolveMatches(cascades);
+                ResolveMatches(cascades, GetPreferredSpecialSpawn(null, null, cascades));
                 return;
             }
 
@@ -490,9 +602,53 @@ namespace MatchRogue
             }
         }
 
-        private HashSet<Vector2Int> FindMatches()
+        private void ExpandSpecialClears(HashSet<Vector2Int> baseClears, HashSet<Vector2Int> output)
         {
-            var result = new HashSet<Vector2Int>();
+            foreach (var pos in baseClears.ToArray())
+            {
+                if (!IsInside(pos) || board[pos.x, pos.y] == null)
+                {
+                    continue;
+                }
+
+                var tile = board[pos.x, pos.y];
+                switch (tile.Special)
+                {
+                    case SpecialKind.LineHorizontal:
+                        for (var x = 0; x < Width; x++)
+                        {
+                            output.Add(new Vector2Int(x, pos.y));
+                        }
+                        break;
+                    case SpecialKind.LineVertical:
+                        for (var y = 0; y < Height; y++)
+                        {
+                            output.Add(new Vector2Int(pos.x, y));
+                        }
+                        break;
+                    case SpecialKind.Bomb:
+                        AddNeighbors(pos, output);
+                        break;
+                    case SpecialKind.Rainbow:
+                        var targetType = tile.Type;
+                        for (var x = 0; x < Width; x++)
+                        {
+                            for (var y = 0; y < Height; y++)
+                            {
+                                if (board[x, y] != null && board[x, y].Type == targetType)
+                                {
+                                    output.Add(new Vector2Int(x, y));
+                                }
+                            }
+                        }
+                        break;
+                }
+            }
+        }
+
+        private List<MatchGroup> FindMatchGroups()
+        {
+            var result = new List<MatchGroup>();
 
             for (var y = 0; y < Height; y++)
             {
@@ -509,10 +665,13 @@ namespace MatchRogue
                     var runLength = x - runStart;
                     if (runLength >= 3)
                     {
+                        var positions = new List<Vector2Int>();
                         for (var i = runStart; i < x; i++)
                         {
-                            result.Add(new Vector2Int(i, y));
+                            positions.Add(new Vector2Int(i, y));
                         }
+
+                        result.Add(new MatchGroup(positions, MatchOrientation.Horizontal));
                     }
 
                     runStart = x;
@@ -534,10 +693,13 @@ namespace MatchRogue
                     var runLength = y - runStart;
                     if (runLength >= 3)
                     {
+                        var positions = new List<Vector2Int>();
                         for (var i = runStart; i < y; i++)
                         {
-                            result.Add(new Vector2Int(x, i));
+                            positions.Add(new Vector2Int(x, i));
                         }
+
+                        result.Add(new MatchGroup(positions, MatchOrientation.Vertical));
                     }
 
                     runStart = y;
@@ -545,6 +707,85 @@ namespace MatchRogue
             }
 
             return result;
+        }
+
+        private Vector2Int? GetPreferredSpecialSpawn(Vector2Int? firstSwap, Vector2Int? secondSwap, List<MatchGroup> matchGroups)
+        {
+            if (matchGroups.Count == 0)
+            {
+                return null;
+            }
+
+            var matchedPositions = new HashSet<Vector2Int>(matchGroups.SelectMany(group => group.Positions));
+            if (firstSwap.HasValue && matchedPositions.Contains(firstSwap.Value))
+            {
+                return firstSwap.Value;
+            }
+
+            if (secondSwap.HasValue && matchedPositions.Contains(secondSwap.Value))
+            {
+                return secondSwap.Value;
+            }
+
+            var intersections = matchGroups
+                .SelectMany(group => group.Positions)
+                .GroupBy(pos => pos)
+                .FirstOrDefault(group => group.Count() > 1);
+            if (intersections != null)
+            {
+                return intersections.Key;
+            }
+
+            return matchGroups.OrderByDescending(group => group.Positions.Count).First().Positions[0];
+        }
+
+        private PendingSpecial? DetermineSpecialKind(List<MatchGroup> matchGroups, Vector2Int? spawnPosition)
+        {
+            if (matchGroups.Count == 0)
+            {
+                return null;
+            }
+
+            var intersection = matchGroups
+                .SelectMany(group => group.Positions)
+                .GroupBy(pos => pos)
+                .FirstOrDefault(group => group.Count() > 1);
+            if (intersection != null)
+            {
+                return new PendingSpecial(intersection.Key, SpecialKind.Bomb);
+            }
+
+            var strongestGroup = matchGroups.OrderByDescending(group => group.Positions.Count).First();
+            var position = spawnPosition.HasValue && strongestGroup.Positions.Contains(spawnPosition.Value)
+                ? spawnPosition.Value
+                : strongestGroup.Positions[0];
+
+            if (strongestGroup.Positions.Count >= 5)
+            {
+                return new PendingSpecial(position, SpecialKind.Rainbow);
+            }
+
+            if (strongestGroup.Positions.Count == 4)
+            {
+                var specialKind = strongestGroup.Orientation == MatchOrientation.Horizontal
+                    ? SpecialKind.LineHorizontal
+                    : SpecialKind.LineVertical;
+                return new PendingSpecial(position, specialKind);
+            }
+
+            return null;
+        }
+
+        private void CreateSpecialTileAt(PendingSpecial pendingSpecial)
+        {
+            var pos = pendingSpecial.Position;
+            if (!IsInside(pos) || board[pos.x, pos.y] == null)
+            {
+                return;
+            }
+
+            board[pos.x, pos.y].Special = pendingSpecial.Special;
+            DecorateTile(board[pos.x, pos.y]);
         }
 
         private void ApplyGravity()
@@ -610,7 +851,6 @@ namespace MatchRogue
             var choices = RollUpgradeChoices();
             for (var i = 0; i < upgradeButtons.Length; i++)
             {
-                var index = i;
                 var upgrade = choices[i];
                 var button = upgradeButtons[i];
                 button.GetComponentInChildren<Text>().text = $"{upgrade.Name}\n{upgrade.Description}";
@@ -788,17 +1028,43 @@ namespace MatchRogue
 
         private sealed class Tile
         {
-            public Tile(int type, GameObject tileObject)
+            public Tile(int type, SpecialKind special, GameObject tileObject)
             {
                 Type = type;
+                Special = special;
                 Object = tileObject;
             }
 
             public int Type { get; }
+            public SpecialKind Special { get; set; }
             public GameObject Object { get; }
         }
 
-        private readonly struct RogueUpgrade
+        private sealed class MatchGroup
+        {
+            public MatchGroup(List<Vector2Int> positions, MatchOrientation orientation)
+            {
+                Positions = positions;
+                Orientation = orientation;
+            }
+
+            public List<Vector2Int> Positions { get; }
+            public MatchOrientation Orientation { get; }
+        }
+
+        private struct PendingSpecial
+        {
+            public PendingSpecial(Vector2Int position, SpecialKind special)
+            {
+                Position = position;
+                Special = special;
+            }
+
+            public Vector2Int Position { get; }
+            public SpecialKind Special { get; }
+        }
+
+        private struct RogueUpgrade
         {
             public RogueUpgrade(UpgradeKind kind, string name, string description, float value)
             {
@@ -820,6 +1086,21 @@ namespace MatchRogue
             BombChance,
             ExtraMoves,
             TargetDiscount
+        }
+
+        private enum MatchOrientation
+        {
+            Horizontal,
+            Vertical
+        }
+
+        private enum SpecialKind
+        {
+            None,
+            LineHorizontal,
+            LineVertical,
+            Bomb,
+            Rainbow
         }
     }
 }
