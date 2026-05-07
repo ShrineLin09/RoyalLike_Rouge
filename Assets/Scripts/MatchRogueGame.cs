@@ -49,9 +49,11 @@ namespace MatchRogue
         private float timeRemaining;
         private float roomTimeLimit;
         private int comboChain;
-
-        private float TileSpacing => 1.05f;
-        private Vector3 BoardOrigin => new Vector3(-3.65f, -3.5f, 0f);
+        private float tileSpacing = 1f;
+        private float tileScale = 0.82f;
+        private Vector3 boardOrigin;
+        private int lastScreenWidth;
+        private int lastScreenHeight;
 
         private void Awake()
         {
@@ -61,6 +63,12 @@ namespace MatchRogue
 
         private void Update()
         {
+            if (Screen.width != lastScreenWidth || Screen.height != lastScreenHeight)
+            {
+                ConfigureCameraAndBoardLayout();
+                RefreshBoardTransforms();
+            }
+
             if (inputLocked)
             {
                 return;
@@ -92,13 +100,32 @@ namespace MatchRogue
             }
 
             mainCamera.orthographic = true;
-            mainCamera.orthographicSize = 6.4f;
             mainCamera.transform.position = new Vector3(0f, 0f, -10f);
             mainCamera.backgroundColor = new Color(0.10f, 0.09f, 0.13f);
 
             boardRoot = new GameObject("Board").transform;
+            ConfigureCameraAndBoardLayout();
             BuildBackground();
             BuildUi();
+        }
+
+        private void ConfigureCameraAndBoardLayout()
+        {
+            lastScreenWidth = Mathf.Max(1, Screen.width);
+            lastScreenHeight = Mathf.Max(1, Screen.height);
+
+            var aspect = lastScreenWidth / (float)lastScreenHeight;
+            tileSpacing = 1f;
+            tileScale = 0.82f;
+
+            var boardWidth = (Width - 1) * tileSpacing + tileScale;
+            var boardHeight = (Height - 1) * tileSpacing + tileScale;
+            var requiredHalfHeightForWidth = boardWidth / (2f * Mathf.Max(0.1f, aspect)) + 0.28f;
+            var requiredHalfHeightForHeight = boardHeight * 0.5f + 1.95f;
+            mainCamera.orthographicSize = Mathf.Max(6.4f, requiredHalfHeightForWidth, requiredHalfHeightForHeight);
+
+            var boardCenter = new Vector3(0f, -0.35f, 0f);
+            boardOrigin = boardCenter - new Vector3((Width - 1) * tileSpacing * 0.5f, (Height - 1) * tileSpacing * 0.5f, 0f);
         }
 
         private void BuildBackground()
@@ -111,7 +138,7 @@ namespace MatchRogue
                     cell.name = $"Cell {x},{y}";
                     cell.transform.SetParent(boardRoot);
                     cell.transform.position = GridToWorld(x, y) + new Vector3(0f, 0f, 0.2f);
-                    cell.transform.localScale = Vector3.one * 0.98f;
+                    cell.transform.localScale = Vector3.one * (tileScale + 0.08f);
                     var renderer = cell.GetComponent<MeshRenderer>();
                     renderer.material = new Material(Shader.Find("Sprites/Default"));
                     renderer.material.color = (x + y) % 2 == 0
@@ -130,7 +157,7 @@ namespace MatchRogue
             canvasObject.GetComponent<CanvasScaler>().referenceResolution = new Vector2(1080f, 1920f);
             canvasObject.AddComponent<GraphicRaycaster>();
 
-            statusText = CreateText("Status", new Vector2(40f, -40f), new Vector2(1000f, 240f), 38, TextAnchor.UpperLeft);
+            statusText = CreateText("Status", new Vector2(40f, -82f), new Vector2(1000f, 260f), 32, TextAnchor.UpperLeft);
             upgradeText = CreateText("UpgradeTitle", new Vector2(0f, 520f), new Vector2(1000f, 120f), 42, TextAnchor.MiddleCenter);
             upgradeText.text = "";
 
@@ -277,7 +304,7 @@ namespace MatchRogue
             go.name = $"Tile {x},{y}";
             go.transform.SetParent(boardRoot);
             go.transform.position = GridToWorld(x, y);
-            go.transform.localScale = Vector3.one * 0.84f;
+            go.transform.localScale = Vector3.one * tileScale;
 
             var renderer = go.GetComponent<MeshRenderer>();
             renderer.material = new Material(Shader.Find("Sprites/Default"));
@@ -341,14 +368,14 @@ namespace MatchRogue
         private void Select(Vector2Int grid)
         {
             selected = grid;
-            board[grid.x, grid.y].Object.transform.localScale = Vector3.one * 1.02f;
+            board[grid.x, grid.y].Object.transform.localScale = Vector3.one * (tileScale + 0.16f);
         }
 
         private void Deselect(Vector2Int grid)
         {
             if (IsInside(grid) && board[grid.x, grid.y] != null)
             {
-                board[grid.x, grid.y].Object.transform.localScale = Vector3.one * 0.84f;
+                board[grid.x, grid.y].Object.transform.localScale = Vector3.one * tileScale;
             }
         }
 
@@ -666,13 +693,56 @@ namespace MatchRogue
 
         private Vector3 GridToWorld(int x, int y)
         {
-            return BoardOrigin + new Vector3(x * TileSpacing, y * TileSpacing, 0f);
+            return boardOrigin + new Vector3(x * tileSpacing, y * tileSpacing, 0f);
         }
 
         private Vector2Int WorldToGrid(Vector3 world)
         {
-            var local = world - BoardOrigin;
-            return new Vector2Int(Mathf.RoundToInt(local.x / TileSpacing), Mathf.RoundToInt(local.y / TileSpacing));
+            var local = world - boardOrigin;
+            return new Vector2Int(Mathf.RoundToInt(local.x / tileSpacing), Mathf.RoundToInt(local.y / tileSpacing));
+        }
+
+        private void RefreshBoardTransforms()
+        {
+            for (var x = 0; x < Width; x++)
+            {
+                for (var y = 0; y < Height; y++)
+                {
+                    var tile = board[x, y];
+                    if (tile == null)
+                    {
+                        continue;
+                    }
+
+                    tile.Object.transform.position = GridToWorld(x, y);
+                    tile.Object.transform.localScale = Vector3.one * tileScale;
+                }
+            }
+
+            if (boardRoot == null)
+            {
+                return;
+            }
+
+            foreach (Transform child in boardRoot)
+            {
+                if (!child.name.StartsWith("Cell ", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var coordinateText = child.name.Substring(5);
+                var parts = coordinateText.Split(',');
+                if (parts.Length != 2 ||
+                    !int.TryParse(parts[0], out var x) ||
+                    !int.TryParse(parts[1], out var y))
+                {
+                    continue;
+                }
+
+                child.position = GridToWorld(x, y) + new Vector3(0f, 0f, 0.2f);
+                child.localScale = Vector3.one * (tileScale + 0.08f);
+            }
         }
 
         private bool IsInside(Vector2Int pos)
