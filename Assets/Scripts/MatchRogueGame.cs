@@ -291,7 +291,6 @@ namespace MatchRogue
             score = 0;
             comboChain = 0;
             roomMoveLimit = Mathf.Max(14, 24 - (layer - 1) - Mathf.FloorToInt((room - 1) * 0.5f));
-            roomMoveLimit += Mathf.RoundToInt(GetUpgradeValue(UpgradeKind.ExtraMoves));
             movesRemaining = roomMoveLimit;
             baseTargetScore = Mathf.RoundToInt((950 + room * 170 + layer * 260) * GetDifficultyMultiplier());
             targetScore = GetAdjustedTargetScore();
@@ -549,6 +548,7 @@ namespace MatchRogue
             if (board[pos.x, pos.y].Special == SpecialKind.Rainbow)
             {
                 AddTilesOfType(GetMostCommonTileType(), clearSet);
+                ApplyRainbowBonusClears(pos, clearSet);
             }
 
             AwardScoreForClears(clearSet.Count);
@@ -593,6 +593,7 @@ namespace MatchRogue
             if (board[specialPos.x, specialPos.y].Special == SpecialKind.Rainbow)
             {
                 AddTilesOfType(board[normalPos.x, normalPos.y].Type, clearSet);
+                ApplyRainbowBonusClears(specialPos, clearSet);
             }
 
             AwardScoreForClears(clearSet.Count);
@@ -728,7 +729,6 @@ namespace MatchRogue
         private void AwardScoreForClears(int clearCount)
         {
             var scoreGain = clearCount * 80;
-            scoreGain += Mathf.RoundToInt(scoreGain * GetUpgradeValue(UpgradeKind.ScorePercent) / 100f);
             scoreGain += comboChain > 1 ? comboChain * 40 : 0;
             score += scoreGain;
         }
@@ -740,7 +740,6 @@ namespace MatchRogue
 
         private IEnumerator ResolveClearSetRoutine(HashSet<Vector2Int> baseClears, PendingSpecial? specialToCreate, bool expandSpecials = true)
         {
-            var bombChance = GetUpgradeValue(UpgradeKind.BombChance);
             var currentClears = baseClears;
             var currentSpecial = specialToCreate;
             var currentExpandSpecials = expandSpecials;
@@ -755,14 +754,6 @@ namespace MatchRogue
                     ExpandSpecialClears(currentClears, bonusClears);
                 }
 
-                foreach (var pos in currentClears.ToArray())
-                {
-                    if (UnityEngine.Random.value * 100f < bombChance)
-                    {
-                        AddNeighbors(pos, bonusClears);
-                    }
-                }
-
                 if (currentSpecial.HasValue)
                 {
                     bonusClears.Remove(currentSpecial.Value.Position);
@@ -774,6 +765,8 @@ namespace MatchRogue
                 {
                     CreateSpecialTileAt(currentSpecial.Value);
                 }
+
+                ApplyPostClearUpgradeSpawns(bonusClears);
 
                 var fallMoves = ApplyGravity();
                 var spawnMoves = RefillBoard();
@@ -913,6 +906,91 @@ namespace MatchRogue
             }
         }
 
+        private void ApplyPostClearUpgradeSpawns(HashSet<Vector2Int> clearedPositions)
+        {
+            TryCreateRandomSpecial(UpgradeKind.BombSpawn, SpecialKind.Bomb, clearedPositions.Count, 0.18f, 0.32f, 0.48f);
+            TryCreateRandomSpecial(UpgradeKind.RocketSpawn, rng.Next(2) == 0 ? SpecialKind.LineHorizontal : SpecialKind.LineVertical, clearedPositions.Count, 0.16f, 0.30f, 0.45f);
+            TryCreateRandomSpecial(UpgradeKind.RocketOnHit, rng.Next(2) == 0 ? SpecialKind.LineHorizontal : SpecialKind.LineVertical, clearedPositions.Count, 0.10f, 0.22f, 0.22f);
+            TryCreateRandomSpecial(UpgradeKind.RainbowAfterSpecial, RollRandomSpecial(), clearedPositions.Count, 0.14f, 0.28f, 0.42f);
+            TryCreateRandomSpecial(UpgradeKind.RainbowCopy, SpecialKind.Rainbow, clearedPositions.Count, 0.10f, 0.20f, 0.20f);
+        }
+
+        private void TryCreateRandomSpecial(UpgradeKind kind, SpecialKind special, int clearedCount, float levelOneChance, float levelTwoChance, float levelThreeChance)
+        {
+            var level = GetUpgradeLevel(kind);
+            if (level <= 0 || clearedCount <= 0)
+            {
+                return;
+            }
+
+            var chance = GetChanceByLevel(level, levelOneChance, levelTwoChance, levelThreeChance);
+            if (UnityEngine.Random.value > chance)
+            {
+                return;
+            }
+
+            var spawnCount = clearedCount >= 18 && level >= 2 ? 2 : 1;
+            for (var i = 0; i < spawnCount; i++)
+            {
+                CreateSpecialOnRandomColorTile(special);
+            }
+        }
+
+        private float GetChanceByLevel(int level, float levelOne, float levelTwo, float levelThree)
+        {
+            if (level <= 1)
+            {
+                return levelOne;
+            }
+
+            if (level == 2)
+            {
+                return levelTwo;
+            }
+
+            return levelThree;
+        }
+
+        private SpecialKind RollRandomSpecial()
+        {
+            var roll = rng.Next(4);
+            if (roll == 0)
+            {
+                return SpecialKind.Bomb;
+            }
+
+            if (roll == 1)
+            {
+                return SpecialKind.Rainbow;
+            }
+
+            return rng.Next(2) == 0 ? SpecialKind.LineHorizontal : SpecialKind.LineVertical;
+        }
+
+        private void CreateSpecialOnRandomColorTile(SpecialKind special)
+        {
+            var candidates = new List<Vector2Int>();
+            for (var x = 0; x < Width; x++)
+            {
+                for (var y = 0; y < Height; y++)
+                {
+                    if (IsColorTile(board[x, y]))
+                    {
+                        candidates.Add(new Vector2Int(x, y));
+                    }
+                }
+            }
+
+            if (candidates.Count == 0)
+            {
+                return;
+            }
+
+            var pos = candidates[rng.Next(candidates.Count)];
+            board[pos.x, pos.y].Special = special;
+            DecorateTile(board[pos.x, pos.y]);
+        }
+
         private void ExpandSpecialClears(HashSet<Vector2Int> baseClears, HashSet<Vector2Int> output)
         {
             foreach (var pos in baseClears.ToArray())
@@ -926,34 +1004,114 @@ namespace MatchRogue
                 switch (tile.Special)
                 {
                     case SpecialKind.LineHorizontal:
-                        for (var x = 0; x < Width; x++)
-                        {
-                            output.Add(new Vector2Int(x, pos.y));
-                        }
+                        AddRocketClear(pos, MatchOrientation.Horizontal, output);
                         break;
                     case SpecialKind.LineVertical:
-                        for (var y = 0; y < Height; y++)
-                        {
-                            output.Add(new Vector2Int(pos.x, y));
-                        }
+                        AddRocketClear(pos, MatchOrientation.Vertical, output);
                         break;
                     case SpecialKind.Bomb:
-                        AddNeighbors(pos, output);
+                        AddBombClear(pos, output);
                         break;
                     case SpecialKind.Rainbow:
-                        var targetType = tile.Type;
-                        for (var x = 0; x < Width; x++)
-                        {
-                            for (var y = 0; y < Height; y++)
-                            {
-                                if (board[x, y] != null && board[x, y].Type == targetType)
-                                {
-                                    output.Add(new Vector2Int(x, y));
-                                }
-                            }
-                        }
+                        AddTilesOfType(GetMostCommonTileType(), output);
+                        ApplyRainbowBonusClears(pos, output);
                         break;
                 }
+            }
+        }
+
+        private void AddRocketClear(Vector2Int pos, MatchOrientation orientation, HashSet<Vector2Int> output)
+        {
+            if (orientation == MatchOrientation.Horizontal)
+            {
+                AddRow(pos.y, output);
+            }
+            else
+            {
+                AddColumn(pos.x, output);
+            }
+
+            if (GetUpgradeLevel(UpgradeKind.RocketSplit) > 0)
+            {
+                if (orientation == MatchOrientation.Horizontal)
+                {
+                    AddColumn(pos.x, output);
+                }
+                else
+                {
+                    AddRow(pos.y, output);
+                }
+            }
+
+            var extraLevel = GetUpgradeLevel(UpgradeKind.RocketExtra);
+            if (extraLevel > 0 && UnityEngine.Random.value < GetChanceByLevel(extraLevel, 0.35f, 0.65f, 1f))
+            {
+                if (orientation == MatchOrientation.Horizontal)
+                {
+                    AddRow(Mathf.Clamp(pos.y + (rng.Next(2) == 0 ? -1 : 1), 0, Height - 1), output);
+                }
+                else
+                {
+                    AddColumn(Mathf.Clamp(pos.x + (rng.Next(2) == 0 ? -1 : 1), 0, Width - 1), output);
+                }
+            }
+        }
+
+        private void AddBombClear(Vector2Int pos, HashSet<Vector2Int> output)
+        {
+            var radius = 1 + Mathf.Min(2, GetUpgradeLevel(UpgradeKind.BombRadius));
+            if (GetUpgradeLevel(UpgradeKind.ExplosionAftershock) > 0)
+            {
+                radius += 1;
+            }
+
+            AddRadius(pos, radius, output);
+            if (GetUpgradeLevel(UpgradeKind.BombChain) <= 0)
+            {
+                return;
+            }
+
+            var chained = new HashSet<Vector2Int> { pos };
+            var searchIndex = 0;
+            var queue = output.Where(IsSpecialTile).ToList();
+            while (searchIndex < queue.Count)
+            {
+                var chainPos = queue[searchIndex++];
+                if (chained.Contains(chainPos))
+                {
+                    continue;
+                }
+
+                chained.Add(chainPos);
+                var before = output.Count;
+                switch (board[chainPos.x, chainPos.y].Special)
+                {
+                    case SpecialKind.Bomb:
+                        AddRadius(chainPos, radius, output);
+                        break;
+                    case SpecialKind.LineHorizontal:
+                        AddRocketClear(chainPos, MatchOrientation.Horizontal, output);
+                        break;
+                    case SpecialKind.LineVertical:
+                        AddRocketClear(chainPos, MatchOrientation.Vertical, output);
+                        break;
+                    case SpecialKind.Rainbow:
+                        AddTilesOfType(GetMostCommonTileType(), output);
+                        break;
+                }
+
+                if (output.Count != before)
+                {
+                    queue = output.Where(IsSpecialTile).ToList();
+                }
+            }
+        }
+
+        private void ApplyRainbowBonusClears(Vector2Int pos, HashSet<Vector2Int> output)
+        {
+            if (GetUpgradeLevel(UpgradeKind.RainbowChainBomb) > 0)
+            {
+                AddRadius(pos, 1 + GetUpgradeLevel(UpgradeKind.RainbowChainBomb), output);
             }
         }
 
@@ -1232,12 +1390,21 @@ namespace MatchRogue
                 ? $"第 {layer} 层奖励"
                 : room == 1 ? "进入下一大关" : $"第 {room - 1} 小关完成";
 
+            SetUpgradePanel(true);
             var choices = RollUpgradeChoices();
             for (var i = 0; i < upgradeButtons.Length; i++)
             {
+                if (i >= choices.Length)
+                {
+                    upgradeButtons[i].gameObject.SetActive(false);
+                    continue;
+                }
+
                 var upgrade = choices[i];
                 var button = upgradeButtons[i];
-                button.GetComponentInChildren<Text>().text = $"{upgrade.Name}\n{upgrade.Description}";
+                button.gameObject.SetActive(true);
+                button.GetComponent<Image>().color = GetFactionColor(upgrade.Faction);
+                button.GetComponentInChildren<Text>().text = $"{GetFactionLabel(upgrade.Faction)} {upgrade.Name}\n{upgrade.Description}";
                 button.onClick.RemoveAllListeners();
                 button.onClick.AddListener(() =>
                 {
@@ -1245,23 +1412,106 @@ namespace MatchRogue
                     StartRoom();
                 });
             }
-
-            SetUpgradePanel(true);
         }
 
         private RogueUpgrade[] RollUpgradeChoices()
         {
-            var pool = new[]
-            {
-                new RogueUpgrade(UpgradeKind.ScorePercent, "连消狂热", "消除得分 +20%。", 20f),
-                new RogueUpgrade(UpgradeKind.BombChance, "火花棋子", "被消除的棋子有 8% 概率清除周围格子。", 8f),
-                new RogueUpgrade(UpgradeKind.ExtraMoves, "从容开局", "每个小关初始步数 +3。", 3f),
-                new RogueUpgrade(UpgradeKind.TargetDiscount, "目标减压", "后续小关目标分数 -8%。", 8f),
-                new RogueUpgrade(UpgradeKind.ScorePercent, "巨型连锁", "消除得分 +35%。", 35f),
-                new RogueUpgrade(UpgradeKind.BombChance, "炽热棋盘", "被消除的棋子有 14% 概率清除周围格子。", 14f)
-            };
+            var pool = GetUpgradePool()
+                .Where(upgrade => GetUpgradeLevel(upgrade.Kind) < upgrade.MaxLevel)
+                .Where(IsUpgradeUnlocked)
+                .ToList();
 
-            return pool.OrderBy(_ => rng.Next()).Take(3).ToArray();
+            if (pool.Count == 0)
+            {
+                pool = GetUpgradePool()
+                    .Where(upgrade => upgrade.IsCore && GetUpgradeLevel(upgrade.Kind) < upgrade.MaxLevel)
+                    .ToList();
+            }
+
+            var choices = new List<RogueUpgrade>();
+            while (choices.Count < upgradeButtons.Length && pool.Count > 0)
+            {
+                var picked = PickWeightedUpgrade(pool);
+                choices.Add(picked);
+                pool.RemoveAll(upgrade => upgrade.Kind == picked.Kind);
+            }
+
+            return choices.ToArray();
+        }
+
+        private RogueUpgrade PickWeightedUpgrade(List<RogueUpgrade> pool)
+        {
+            var totalWeight = pool.Sum(GetUpgradeWeight);
+            var roll = rng.NextDouble() * totalWeight;
+            foreach (var upgrade in pool)
+            {
+                roll -= GetUpgradeWeight(upgrade);
+                if (roll <= 0)
+                {
+                    return upgrade;
+                }
+            }
+
+            return pool[pool.Count - 1];
+        }
+
+        private float GetUpgradeWeight(RogueUpgrade upgrade)
+        {
+            if (upgrade.IsCore)
+            {
+                return HasAnyCore() ? 18f : 70f;
+            }
+
+            var factionLevel = GetFactionInvestment(upgrade.Faction);
+            return 45f + factionLevel * 18f;
+        }
+
+        private bool IsUpgradeUnlocked(RogueUpgrade upgrade)
+        {
+            return upgrade.IsCore || HasFactionCore(upgrade.Faction);
+        }
+
+        private bool HasAnyCore()
+        {
+            return activeUpgrades.Any(upgrade => upgrade.IsCore);
+        }
+
+        private bool HasFactionCore(UpgradeFaction faction)
+        {
+            return activeUpgrades.Any(upgrade => upgrade.Faction == faction && upgrade.IsCore);
+        }
+
+        private int GetFactionInvestment(UpgradeFaction faction)
+        {
+            return activeUpgrades.Count(upgrade => upgrade.Faction == faction);
+        }
+
+        private int GetUpgradeLevel(UpgradeKind kind)
+        {
+            return activeUpgrades.Count(upgrade => upgrade.Kind == kind);
+        }
+
+        private RogueUpgrade[] GetUpgradePool()
+        {
+            return new[]
+            {
+                new RogueUpgrade(UpgradeKind.ExplosionCore, UpgradeFaction.Explosion, "爆破核心", "解锁爆炸流。炸弹触发会尝试制造更多爆点。", 1, true),
+                new RogueUpgrade(UpgradeKind.BombRadius, UpgradeFaction.Explosion, "炸弹扩容", "炸弹爆炸范围提升。", 3, false),
+                new RogueUpgrade(UpgradeKind.BombChain, UpgradeFaction.Explosion, "连锁引爆", "炸弹会引爆范围内的其他特效。", 1, false),
+                new RogueUpgrade(UpgradeKind.BombSpawn, UpgradeFaction.Explosion, "越炸越多", "每轮爆炸后有概率把普通棋子变成炸弹。", 3, false),
+                new RogueUpgrade(UpgradeKind.ExplosionAftershock, UpgradeFaction.Explosion, "爆炸余波", "炸弹额外清除周围棋子。", 2, false),
+
+                new RogueUpgrade(UpgradeKind.RocketCore, UpgradeFaction.Rocket, "火箭核心", "解锁火箭流。火箭更容易连续扫屏。", 1, true),
+                new RogueUpgrade(UpgradeKind.RocketSplit, UpgradeFaction.Rocket, "火箭分裂", "火箭触发时额外扫过交叉方向。", 2, false),
+                new RogueUpgrade(UpgradeKind.RocketExtra, UpgradeFaction.Rocket, "额外发射", "火箭有概率额外发射邻近轨道。", 3, false),
+                new RogueUpgrade(UpgradeKind.RocketSpawn, UpgradeFaction.Rocket, "火箭补给", "每轮清除后有概率生成火箭。", 3, false),
+                new RogueUpgrade(UpgradeKind.RocketOnHit, UpgradeFaction.Rocket, "扫屏回响", "火箭命中后更容易留下新火箭。", 2, false),
+
+                new RogueUpgrade(UpgradeKind.RainbowCore, UpgradeFaction.Rainbow, "彩虹核心", "解锁彩虹流。彩球会制造更多失控连锁。", 1, true),
+                new RogueUpgrade(UpgradeKind.RainbowCopy, UpgradeFaction.Rainbow, "彩虹复制", "彩球触发后有概率复制新的彩球。", 2, false),
+                new RogueUpgrade(UpgradeKind.RainbowAfterSpecial, UpgradeFaction.Rainbow, "彩虹裂变", "彩球触发后生成随机特效。", 3, false),
+                new RogueUpgrade(UpgradeKind.RainbowChainBomb, UpgradeFaction.Rainbow, "彩爆连锁", "彩球触发时额外制造炸弹爆点。", 2, false)
+            };
         }
 
         private void SetUpgradePanel(bool visible)
@@ -1272,17 +1522,6 @@ namespace MatchRogue
             {
                 button.gameObject.SetActive(visible);
             }
-        }
-
-        private float GetUpgradeValue(UpgradeKind kind)
-        {
-            var total = activeUpgrades.Where(upgrade => upgrade.Kind == kind).Sum(upgrade => upgrade.Value);
-            if (kind == UpgradeKind.TargetDiscount)
-            {
-                return Mathf.Clamp(total, 0f, 50f);
-            }
-
-            return total;
         }
 
         private void FailRun()
@@ -1315,7 +1554,7 @@ namespace MatchRogue
 
             return string.Join("、", activeUpgrades
                 .GroupBy(upgrade => upgrade.Name)
-                .Select(group => group.Count() > 1 ? $"{group.Key} x{group.Count()}" : group.Key));
+                .Select(group => group.Count() > 1 ? $"{group.Key} Lv.{group.Count()}" : group.Key));
         }
 
         private bool IsPointerOverUi()
@@ -1325,8 +1564,37 @@ namespace MatchRogue
 
         private int GetAdjustedTargetScore()
         {
-            var discount = GetUpgradeValue(UpgradeKind.TargetDiscount);
-            return Mathf.Max(300, Mathf.RoundToInt(baseTargetScore * (1f - discount / 100f)));
+            return Mathf.Max(300, baseTargetScore);
+        }
+
+        private Color GetFactionColor(UpgradeFaction faction)
+        {
+            switch (faction)
+            {
+                case UpgradeFaction.Explosion:
+                    return new Color(0.62f, 0.20f, 0.12f, 0.96f);
+                case UpgradeFaction.Rocket:
+                    return new Color(0.10f, 0.34f, 0.54f, 0.96f);
+                case UpgradeFaction.Rainbow:
+                    return new Color(0.44f, 0.18f, 0.58f, 0.96f);
+                default:
+                    return new Color(0.22f, 0.20f, 0.29f, 0.95f);
+            }
+        }
+
+        private string GetFactionLabel(UpgradeFaction faction)
+        {
+            switch (faction)
+            {
+                case UpgradeFaction.Explosion:
+                    return "[爆炸]";
+                case UpgradeFaction.Rocket:
+                    return "[火箭]";
+                case UpgradeFaction.Rainbow:
+                    return "[彩虹]";
+                default:
+                    return "[通用]";
+            }
         }
 
         private Font GetRuntimeFont()
@@ -1498,26 +1766,47 @@ namespace MatchRogue
 
         private struct RogueUpgrade
         {
-            public RogueUpgrade(UpgradeKind kind, string name, string description, float value)
+            public RogueUpgrade(UpgradeKind kind, UpgradeFaction faction, string name, string description, int maxLevel, bool isCore)
             {
                 Kind = kind;
+                Faction = faction;
                 Name = name;
                 Description = description;
-                Value = value;
+                MaxLevel = maxLevel;
+                IsCore = isCore;
             }
 
             public UpgradeKind Kind { get; }
+            public UpgradeFaction Faction { get; }
             public string Name { get; }
             public string Description { get; }
-            public float Value { get; }
+            public int MaxLevel { get; }
+            public bool IsCore { get; }
         }
 
         private enum UpgradeKind
         {
-            ScorePercent,
-            BombChance,
-            ExtraMoves,
-            TargetDiscount
+            ExplosionCore,
+            BombRadius,
+            BombChain,
+            BombSpawn,
+            ExplosionAftershock,
+            RocketCore,
+            RocketSplit,
+            RocketExtra,
+            RocketSpawn,
+            RocketOnHit,
+            RainbowCore,
+            RainbowCopy,
+            RainbowAfterSpecial,
+            RainbowChainBomb
+        }
+
+        private enum UpgradeFaction
+        {
+            Explosion,
+            Rocket,
+            Rainbow
         }
 
         private enum MatchOrientation
