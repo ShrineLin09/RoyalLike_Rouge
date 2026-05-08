@@ -670,7 +670,10 @@ namespace MatchRogue
 
         private void ResolvePropellerCombination(Vector2Int a, Vector2Int b, SpecialKind partnerSpecial, HashSet<Vector2Int> clearSet)
         {
-            var target = GetPropellerTarget();
+            var reservedTargets = new HashSet<Vector2Int> { a, b };
+            var mode = GetPropellerTargetMode(partnerSpecial);
+            var target = GetSmartPropellerTarget(mode, reservedTargets);
+            reservedTargets.Add(target);
             AddCross(a, clearSet);
             if (partnerSpecial == SpecialKind.Bomb)
             {
@@ -691,7 +694,9 @@ namespace MatchRogue
             {
                 for (var i = 0; i < 3; i++)
                 {
-                    clearSet.Add(GetPropellerTarget());
+                    var multiTarget = GetSmartPropellerTarget(PropellerTargetMode.Multi, reservedTargets);
+                    reservedTargets.Add(multiTarget);
+                    clearSet.Add(multiTarget);
                 }
             }
             else
@@ -727,28 +732,177 @@ namespace MatchRogue
             ResolveClearSet(clearSet, null);
         }
 
-        private Vector2Int GetPropellerTarget()
+        private PropellerTargetMode GetPropellerTargetMode(SpecialKind partnerSpecial)
         {
-            var specialTargets = new List<Vector2Int>();
-            var colorTargets = new List<Vector2Int>();
+            if (partnerSpecial == SpecialKind.Bomb)
+            {
+                return PropellerTargetMode.BombCarrier;
+            }
+
+            if (partnerSpecial == SpecialKind.LineHorizontal)
+            {
+                return PropellerTargetMode.RocketCarrierHorizontal;
+            }
+
+            if (partnerSpecial == SpecialKind.LineVertical)
+            {
+                return PropellerTargetMode.RocketCarrierVertical;
+            }
+
+            return partnerSpecial == SpecialKind.Propeller ? PropellerTargetMode.Multi : PropellerTargetMode.Single;
+        }
+
+        private Vector2Int GetSmartPropellerTarget(PropellerTargetMode mode, HashSet<Vector2Int> reserved)
+        {
+            var bestScore = float.MinValue;
+            var bestTargets = new List<Vector2Int>();
             for (var x = 0; x < Width; x++)
             {
                 for (var y = 0; y < Height; y++)
                 {
                     var pos = new Vector2Int(x, y);
-                    if (IsSpecialTile(pos))
+                    if (board[x, y] == null)
                     {
-                        specialTargets.Add(pos);
+                        continue;
                     }
-                    else if (board[x, y] != null)
+
+                    var score = ScorePropellerTarget(pos, mode, reserved);
+                    if (score > bestScore + 0.01f)
                     {
-                        colorTargets.Add(pos);
+                        bestScore = score;
+                        bestTargets.Clear();
+                        bestTargets.Add(pos);
+                    }
+                    else if (Mathf.Abs(score - bestScore) <= 0.01f)
+                    {
+                        bestTargets.Add(pos);
                     }
                 }
             }
 
-            var targets = specialTargets.Count > 0 ? specialTargets : colorTargets;
-            return targets.Count == 0 ? new Vector2Int(rng.Next(Width), rng.Next(Height)) : targets[rng.Next(targets.Count)];
+            return bestTargets.Count == 0 ? new Vector2Int(rng.Next(Width), rng.Next(Height)) : bestTargets[rng.Next(bestTargets.Count)];
+        }
+
+        private float ScorePropellerTarget(Vector2Int target, PropellerTargetMode mode, HashSet<Vector2Int> reserved)
+        {
+            var score = IsColorTile(board[target.x, target.y]) ? 25f : -60f;
+            if (reserved != null)
+            {
+                if (reserved.Contains(target))
+                {
+                    score -= 90f;
+                }
+
+                foreach (var reservedPos in reserved)
+                {
+                    var distance = Mathf.Abs(reservedPos.x - target.x) + Mathf.Abs(reservedPos.y - target.y);
+                    if (distance <= 1)
+                    {
+                        score -= 24f;
+                    }
+                }
+            }
+
+            if (target.x == 0 || target.x == Width - 1)
+            {
+                score += 6f;
+            }
+
+            if (target.y == 0 || target.y == Height - 1)
+            {
+                score += 6f;
+            }
+
+            score += CountAdjacentSameColor(target) <= 1 ? 8f : 0f;
+            var affected = GetPropellerAffectedArea(target, mode);
+            foreach (var pos in affected)
+            {
+                if (!IsInside(pos) || board[pos.x, pos.y] == null)
+                {
+                    continue;
+                }
+
+                var special = board[pos.x, pos.y].Special;
+                if (special == SpecialKind.Rainbow)
+                {
+                    score -= 140f;
+                }
+                else if (special == SpecialKind.Bomb)
+                {
+                    score -= mode == PropellerTargetMode.BombCarrier ? 120f : 85f;
+                }
+                else if (IsRocket(special) || special == SpecialKind.Propeller)
+                {
+                    score -= mode == PropellerTargetMode.Single ? 35f : 65f;
+                }
+                else if (special == SpecialKind.None)
+                {
+                    score += 3f;
+                }
+            }
+
+            return score + (float)rng.NextDouble() * 2f;
+        }
+
+        private HashSet<Vector2Int> GetPropellerAffectedArea(Vector2Int target, PropellerTargetMode mode)
+        {
+            var affected = new HashSet<Vector2Int> { target };
+            switch (mode)
+            {
+                case PropellerTargetMode.BombCarrier:
+                    AddBombClearPreview(target, affected);
+                    break;
+                case PropellerTargetMode.RocketCarrierHorizontal:
+                    AddRow(target.y, affected);
+                    break;
+                case PropellerTargetMode.RocketCarrierVertical:
+                    AddColumn(target.x, affected);
+                    break;
+                case PropellerTargetMode.Single:
+                case PropellerTargetMode.Multi:
+                    break;
+            }
+
+            return affected;
+        }
+
+        private void AddBombClearPreview(Vector2Int target, HashSet<Vector2Int> affected)
+        {
+            var radius = 1 + Mathf.Min(2, GetUpgradeLevel(UpgradeKind.BombRadius));
+            if (GetUpgradeLevel(UpgradeKind.ExplosionAftershock) > 0)
+            {
+                radius += 1;
+            }
+
+            AddRadius(target, radius, affected);
+        }
+
+        private int CountAdjacentSameColor(Vector2Int target)
+        {
+            if (!IsColorTile(board[target.x, target.y]))
+            {
+                return 0;
+            }
+
+            var count = 0;
+            var offsets = new[]
+            {
+                new Vector2Int(1, 0),
+                new Vector2Int(-1, 0),
+                new Vector2Int(0, 1),
+                new Vector2Int(0, -1)
+            };
+
+            foreach (var offset in offsets)
+            {
+                var pos = target + offset;
+                if (IsInside(pos) && HasSameMatchColor(board[target.x, target.y], board[pos.x, pos.y]))
+                {
+                    count++;
+                }
+            }
+
+            return count;
         }
 
         private int GetMostCommonTileType()
@@ -1253,7 +1407,9 @@ namespace MatchRogue
 
         private void AddPropellerClear(Vector2Int pos, HashSet<Vector2Int> output)
         {
-            var target = GetPropellerTarget();
+            var reservedTargets = new HashSet<Vector2Int> { pos };
+            var target = GetSmartPropellerTarget(PropellerTargetMode.Single, reservedTargets);
+            reservedTargets.Add(target);
             AddCross(pos, output);
             output.Add(target);
             if (GetUpgradeLevel(UpgradeKind.PropellerBlast) > 0)
@@ -1267,7 +1423,9 @@ namespace MatchRogue
                 ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.PropellerSwarm));
                 for (var i = 0; i < GetUpgradeLevel(UpgradeKind.PropellerSwarm); i++)
                 {
-                    output.Add(GetPropellerTarget());
+                    var swarmTarget = GetSmartPropellerTarget(PropellerTargetMode.Multi, reservedTargets);
+                    reservedTargets.Add(swarmTarget);
+                    output.Add(swarmTarget);
                 }
             }
         }
@@ -2102,6 +2260,15 @@ namespace MatchRogue
             Horizontal,
             Vertical,
             Square
+        }
+
+        private enum PropellerTargetMode
+        {
+            Single,
+            BombCarrier,
+            RocketCarrierHorizontal,
+            RocketCarrierVertical,
+            Multi
         }
 
         private enum SpecialKind
