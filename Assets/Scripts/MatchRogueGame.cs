@@ -714,8 +714,8 @@ namespace MatchRogue
 
             if (firstIsRocket && secondIsRocket)
             {
-                AddRow(a.y, clearSet);
-                AddColumn(a.x, clearSet);
+                AddRow(b.y, clearSet);
+                AddColumn(b.x, clearSet);
                 AwardScoreForClears(clearSet.Count);
                 ResolveClearSet(clearSet, null, false);
                 return;
