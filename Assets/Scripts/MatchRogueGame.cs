@@ -1580,6 +1580,16 @@ namespace MatchRogue
                 return null;
             }
 
+            var squareGroup = matchGroups.FirstOrDefault(group => group.Orientation == MatchOrientation.Square);
+            if (squareGroup != null)
+            {
+                var matchedPositions = new HashSet<Vector2Int>(matchGroups.SelectMany(group => group.Positions));
+                var squarePosition = spawnPosition.HasValue && matchedPositions.Contains(spawnPosition.Value)
+                    ? spawnPosition.Value
+                    : squareGroup.Positions[0];
+                return new PendingSpecial(squarePosition, SpecialKind.Propeller);
+            }
+
             var intersection = matchGroups
                 .SelectMany(group => group.Positions)
                 .GroupBy(pos => pos)
@@ -1587,15 +1597,6 @@ namespace MatchRogue
             if (intersection != null)
             {
                 return new PendingSpecial(intersection.Key, SpecialKind.Bomb);
-            }
-
-            var squareGroup = matchGroups.FirstOrDefault(group => group.Orientation == MatchOrientation.Square);
-            if (squareGroup != null)
-            {
-                var squarePosition = spawnPosition.HasValue && squareGroup.Positions.Contains(spawnPosition.Value)
-                    ? spawnPosition.Value
-                    : squareGroup.Positions[0];
-                return new PendingSpecial(squarePosition, SpecialKind.Propeller);
             }
 
             var strongestGroup = matchGroups.OrderByDescending(group => group.Positions.Count).First();
