@@ -586,6 +586,17 @@ namespace MatchRogue
                 return;
             }
 
+            if (!IsSelectableTile(grid))
+            {
+                if (selected.HasValue)
+                {
+                    Deselect(selected.Value);
+                    selected = null;
+                }
+
+                return;
+            }
+
             if (!selected.HasValue)
             {
                 Select(grid);
@@ -623,7 +634,14 @@ namespace MatchRogue
 
         private bool CanSwapTiles(Vector2Int from, Vector2Int to)
         {
-            return Mathf.Abs(from.x - to.x) + Mathf.Abs(from.y - to.y) == 1;
+            return Mathf.Abs(from.x - to.x) + Mathf.Abs(from.y - to.y) == 1 &&
+                   IsSelectableTile(from) &&
+                   IsSelectableTile(to);
+        }
+
+        private bool IsSelectableTile(Vector2Int grid)
+        {
+            return IsInside(grid) && board[grid.x, grid.y] != null && board[grid.x, grid.y].CrateHealth <= 0;
         }
 
         private void Select(Vector2Int grid)
@@ -2667,7 +2685,7 @@ namespace MatchRogue
 
         private bool IsColorTile(Tile tile)
         {
-            return tile != null && tile.Special == SpecialKind.None;
+            return tile != null && tile.Special == SpecialKind.None && tile.CrateHealth <= 0;
         }
 
         private bool IsRocket(SpecialKind special)
