@@ -23,8 +23,8 @@ namespace MatchRogue
         private const float CascadePauseSeconds = 0.08f;
         private const int RoomsPerRun = 4;
 
-        private static readonly int[] RoomMoveLimits = { 20, 22, 24, 26 };
-        private static readonly int[] RoomTargetScores = { 4500, 8000, 12500, 18000 };
+        private static readonly int[] RoomMoveLimits = { 30, 28, 26, 24 };
+        private static readonly int[] RoomTargetScores = { 10500, 16500, 26000, 42000 };
 
         private readonly Color[] tileColors =
         {
@@ -303,6 +303,7 @@ namespace MatchRogue
             inputLocked = false;
             selected = null;
             GenerateBoard();
+            SeedShowcaseSpecialsForRoom();
             RefreshBoardTransforms();
             score = 0;
             comboChain = 0;
@@ -1182,15 +1183,15 @@ namespace MatchRogue
         private void ApplyPostClearUpgradeSpawns(HashSet<Vector2Int> clearedPositions)
         {
             TryCreateRandomSpecial(UpgradeKind.BombSpawn, SpecialKind.Bomb, clearedPositions.Count, 0.18f, 0.32f, 0.48f);
-            TryCreateRandomSpecial(UpgradeKind.ExplosionCore, SpecialKind.Bomb, clearedPositions.Count, 0.08f, 0.08f, 0.08f);
+            TryCreateRandomSpecial(UpgradeKind.ExplosionCore, SpecialKind.Bomb, clearedPositions.Count, 0.12f, 0.12f, 0.12f);
             TryCreateRandomSpecial(UpgradeKind.RocketSpawn, rng.Next(2) == 0 ? SpecialKind.LineHorizontal : SpecialKind.LineVertical, clearedPositions.Count, 0.16f, 0.30f, 0.45f);
-            TryCreateRandomSpecial(UpgradeKind.RocketCore, rng.Next(2) == 0 ? SpecialKind.LineHorizontal : SpecialKind.LineVertical, clearedPositions.Count, 0.10f, 0.10f, 0.10f);
+            TryCreateRandomSpecial(UpgradeKind.RocketCore, rng.Next(2) == 0 ? SpecialKind.LineHorizontal : SpecialKind.LineVertical, clearedPositions.Count, 0.14f, 0.14f, 0.14f);
             TryCreateRandomSpecial(UpgradeKind.RocketOnHit, rng.Next(2) == 0 ? SpecialKind.LineHorizontal : SpecialKind.LineVertical, clearedPositions.Count, 0.10f, 0.22f, 0.22f);
             TryCreateRandomSpecial(UpgradeKind.RainbowAfterSpecial, RollRandomSpecial(), clearedPositions.Count, 0.14f, 0.28f, 0.42f);
             TryCreateRandomSpecial(UpgradeKind.RainbowCopy, SpecialKind.Rainbow, clearedPositions.Count, 0.10f, 0.20f, 0.20f);
-            TryCreateRandomSpecial(UpgradeKind.RainbowCore, SpecialKind.Rainbow, clearedPositions.Count, 0.04f, 0.04f, 0.04f);
+            TryCreateRandomSpecial(UpgradeKind.RainbowCore, SpecialKind.Rainbow, clearedPositions.Count, 0.07f, 0.07f, 0.07f);
             TryCreateRandomSpecial(UpgradeKind.PropellerSpawn, SpecialKind.Propeller, clearedPositions.Count, 0.14f, 0.26f, 0.40f);
-            TryCreateRandomSpecial(UpgradeKind.PropellerCore, SpecialKind.Propeller, clearedPositions.Count, 0.10f, 0.10f, 0.10f);
+            TryCreateRandomSpecial(UpgradeKind.PropellerCore, SpecialKind.Propeller, clearedPositions.Count, 0.14f, 0.14f, 0.14f);
             TryCreateRandomSpecial(UpgradeKind.CommonSpecialSeed, RollRandomNonRainbowSpecial(), clearedPositions.Count, 0.10f, 0.18f, 0.18f);
         }
 
@@ -1285,6 +1286,24 @@ namespace MatchRogue
             var pos = candidates[rng.Next(candidates.Count)];
             board[pos.x, pos.y].Special = special;
             DecorateTile(board[pos.x, pos.y]);
+        }
+
+        private void SeedShowcaseSpecialsForRoom()
+        {
+            if (room == 3)
+            {
+                CreateSpecialOnRandomColorTile(rng.Next(2) == 0 ? SpecialKind.LineHorizontal : SpecialKind.LineVertical);
+                return;
+            }
+
+            if (room < 4)
+            {
+                return;
+            }
+
+            CreateSpecialOnRandomColorTile(SpecialKind.Bomb);
+            CreateSpecialOnRandomColorTile(rng.Next(2) == 0 ? SpecialKind.LineHorizontal : SpecialKind.LineVertical);
+            CreateSpecialOnRandomColorTile(SpecialKind.Propeller);
         }
 
         private void ExpandSpecialClears(HashSet<Vector2Int> baseClears, HashSet<Vector2Int> output)
