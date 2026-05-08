@@ -595,6 +595,7 @@ namespace MatchRogue
             var specialPos = first.Special != SpecialKind.None ? a : b;
             var normalPos = first.Special != SpecialKind.None ? b : a;
             var clearSet = new HashSet<Vector2Int> { specialPos };
+            var specialToKeep = new PendingSpecial(normalPos, board[specialPos.x, specialPos.y].Special);
             if (board[specialPos.x, specialPos.y].Special == SpecialKind.Rainbow)
             {
                 AddTilesOfType(board[normalPos.x, normalPos.y].Type, clearSet);
@@ -602,7 +603,7 @@ namespace MatchRogue
             }
 
             AwardScoreForClears(clearSet.Count);
-            ResolveClearSet(clearSet, null);
+            ResolveClearSet(clearSet, specialToKeep);
             return true;
         }
 
@@ -1595,12 +1596,19 @@ namespace MatchRogue
         private void CreateSpecialTileAt(PendingSpecial pendingSpecial)
         {
             var pos = pendingSpecial.Position;
-            if (!IsInside(pos) || board[pos.x, pos.y] == null)
+            if (!IsInside(pos))
             {
                 return;
             }
 
+            if (board[pos.x, pos.y] == null)
+            {
+                board[pos.x, pos.y] = CreateTile(pos.x, pos.y, rng.Next(TileTypes));
+            }
+
             board[pos.x, pos.y].Special = pendingSpecial.Special;
+            board[pos.x, pos.y].Object.transform.position = GridToWorld(pos.x, pos.y);
+            board[pos.x, pos.y].Object.transform.localScale = Vector3.one * tileScale;
             DecorateTile(board[pos.x, pos.y]);
         }
 
