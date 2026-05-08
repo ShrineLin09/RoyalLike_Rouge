@@ -25,8 +25,8 @@ namespace MatchRogue
 
         private static readonly int[] RoomMoveLimits = { 30, 28, 26, 24 };
         private static readonly int[] RoomTargetScores = { 10500, 16500, 26000, 42000 };
-        private static readonly int[] RoomCrateCounts = { 8, 12, 16, 22 };
-        private static readonly float[] RoomTwoLayerCrateRates = { 0f, 0.2f, 0.4f, 0.55f };
+        private static readonly int[] RoomCrateCounts = { 12, 16, 22, 28 };
+        private static readonly int[] RoomTwoLayerCrateCounts = { 1, 4, 8, 12 };
 
         private readonly Color[] tileColors =
         {
@@ -410,24 +410,193 @@ namespace MatchRogue
         private void PlaceRoomCrates()
         {
             var roomIndex = Mathf.Clamp(room - 1, 0, RoomsPerRun - 1);
-            var positions = new List<Vector2Int>();
-            for (var x = 1; x < Width - 1; x++)
+            var template = PickCrateTemplate(room);
+            var positions = BuildCrateTemplate(template);
+            ApplyCrateTemplateJitter(positions, roomIndex);
+            AddFallbackCratePositions(positions);
+
+            totalCrates = Mathf.Min(RoomCrateCounts[roomIndex], positions.Count);
+            remainingCrates = totalCrates;
+            var twoLayerCount = Mathf.Min(RoomTwoLayerCrateCounts[roomIndex], totalCrates);
+            var twoLayerPositions = new HashSet<Vector2Int>(positions
+                .Take(totalCrates)
+                .OrderBy(_ => rng.Next())
+                .Take(twoLayerCount));
+
+            for (var i = 0; i < totalCrates; i++)
             {
-                for (var y = 1; y < Height - 1; y++)
+                var pos = positions[i];
+                board[pos.x, pos.y].CrateHealth = twoLayerPositions.Contains(pos) ? 2 : 1;
+                DecorateTile(board[pos.x, pos.y]);
+            }
+        }
+
+        private CrateLayoutTemplate PickCrateTemplate(int roomNumber)
+        {
+            CrateLayoutTemplate[] candidates;
+            switch (roomNumber)
+            {
+                case 1:
+                    candidates = new[] { CrateLayoutTemplate.EdgeRing, CrateLayoutTemplate.Islands };
+                    break;
+                case 2:
+                    candidates = new[] { CrateLayoutTemplate.CenterBlock, CrateLayoutTemplate.Channel };
+                    break;
+                case 3:
+                    candidates = new[] { CrateLayoutTemplate.Islands, CrateLayoutTemplate.CenterBlock, CrateLayoutTemplate.DenseCluster };
+                    break;
+                default:
+                    candidates = new[] { CrateLayoutTemplate.DenseCluster, CrateLayoutTemplate.Channel, CrateLayoutTemplate.Mixed };
+                    break;
+            }
+
+            return candidates[rng.Next(candidates.Length)];
+        }
+
+        private List<Vector2Int> BuildCrateTemplate(CrateLayoutTemplate template)
+        {
+            var positions = new List<Vector2Int>();
+            switch (template)
+            {
+                case CrateLayoutTemplate.EdgeRing:
+                    for (var x = 0; x < Width; x++)
+                    {
+                        positions.Add(new Vector2Int(x, 0));
+                        positions.Add(new Vector2Int(x, Height - 1));
+                    }
+
+                    for (var y = 1; y < Height - 1; y++)
+                    {
+                        positions.Add(new Vector2Int(0, y));
+                        positions.Add(new Vector2Int(Width - 1, y));
+                    }
+                    break;
+                case CrateLayoutTemplate.CenterBlock:
+                    AddRectPositions(positions, 2, 2, 4, 4);
+                    AddPositions(positions, new Vector2Int(1, 3), new Vector2Int(6, 4), new Vector2Int(3, 1), new Vector2Int(4, 6));
+                    break;
+                case CrateLayoutTemplate.Islands:
+                    AddRectPositions(positions, 1, 1, 2, 2);
+                    AddRectPositions(positions, 5, 1, 2, 2);
+                    AddRectPositions(positions, 1, 5, 2, 2);
+                    AddRectPositions(positions, 5, 5, 2, 2);
+                    AddPositions(positions, new Vector2Int(3, 3), new Vector2Int(4, 4));
+                    break;
+                case CrateLayoutTemplate.Channel:
+                    if (rng.Next(2) == 0)
+                    {
+                        for (var x = 0; x < Width; x++)
+                        {
+                            positions.Add(new Vector2Int(x, 3));
+                            positions.Add(new Vector2Int(x, 4));
+                        }
+                    }
+                    else
+                    {
+                        for (var y = 0; y < Height; y++)
+                        {
+                            positions.Add(new Vector2Int(3, y));
+                            positions.Add(new Vector2Int(4, y));
+                        }
+                    }
+
+                    AddPositions(positions, new Vector2Int(1, 1), new Vector2Int(6, 6), new Vector2Int(1, 6), new Vector2Int(6, 1));
+                    break;
+                case CrateLayoutTemplate.DenseCluster:
+                    AddRectPositions(positions, 2, 2, 4, 4);
+                    AddPositions(positions,
+                        new Vector2Int(1, 2), new Vector2Int(1, 3), new Vector2Int(1, 4), new Vector2Int(1, 5),
+                        new Vector2Int(6, 2), new Vector2Int(6, 3), new Vector2Int(6, 4), new Vector2Int(6, 5),
+                        new Vector2Int(2, 1), new Vector2Int(3, 1), new Vector2Int(4, 1), new Vector2Int(5, 1),
+                        new Vector2Int(2, 6), new Vector2Int(3, 6), new Vector2Int(4, 6), new Vector2Int(5, 6));
+                    break;
+                case CrateLayoutTemplate.Mixed:
+                    positions.AddRange(BuildCrateTemplate(CrateLayoutTemplate.Channel).Take(14));
+                    positions.AddRange(BuildCrateTemplate(CrateLayoutTemplate.DenseCluster).Take(18));
+                    break;
+            }
+
+            return positions
+                .Where(IsInside)
+                .Distinct()
+                .OrderBy(_ => rng.Next())
+                .ToList();
+        }
+
+        private void AddRectPositions(List<Vector2Int> positions, int startX, int startY, int width, int height)
+        {
+            for (var x = startX; x < startX + width; x++)
+            {
+                for (var y = startY; y < startY + height; y++)
                 {
                     positions.Add(new Vector2Int(x, y));
                 }
             }
+        }
 
-            positions = positions.OrderBy(_ => rng.Next()).ToList();
-            totalCrates = Mathf.Min(RoomCrateCounts[roomIndex], positions.Count);
-            remainingCrates = totalCrates;
-            for (var i = 0; i < totalCrates; i++)
+        private void AddPositions(List<Vector2Int> positions, params Vector2Int[] newPositions)
+        {
+            positions.AddRange(newPositions);
+        }
+
+        private void ApplyCrateTemplateJitter(List<Vector2Int> positions, int roomIndex)
+        {
+            var jitterCount = Mathf.Clamp(1 + roomIndex, 1, 4);
+            for (var i = 0; i < jitterCount && positions.Count > 0; i++)
             {
-                var pos = positions[i];
-                var health = rng.NextDouble() < RoomTwoLayerCrateRates[roomIndex] ? 2 : 1;
-                board[pos.x, pos.y].CrateHealth = health;
-                DecorateTile(board[pos.x, pos.y]);
+                var removeIndex = rng.Next(positions.Count);
+                var source = positions[removeIndex];
+                var replacement = FindNearbyOpenTemplatePosition(source, positions);
+                if (replacement.HasValue)
+                {
+                    positions[removeIndex] = replacement.Value;
+                }
+            }
+
+            var shuffled = positions
+                .Distinct()
+                .OrderBy(_ => rng.Next())
+                .ToList();
+            positions.Clear();
+            positions.AddRange(shuffled);
+        }
+
+        private Vector2Int? FindNearbyOpenTemplatePosition(Vector2Int source, List<Vector2Int> occupied)
+        {
+            var offsets = new[]
+            {
+                new Vector2Int(1, 0),
+                new Vector2Int(-1, 0),
+                new Vector2Int(0, 1),
+                new Vector2Int(0, -1),
+                new Vector2Int(1, 1),
+                new Vector2Int(-1, -1)
+            }.OrderBy(_ => rng.Next());
+
+            foreach (var offset in offsets)
+            {
+                var candidate = source + offset;
+                if (IsInside(candidate) && !occupied.Contains(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            return null;
+        }
+
+        private void AddFallbackCratePositions(List<Vector2Int> positions)
+        {
+            for (var x = 0; x < Width; x++)
+            {
+                for (var y = 0; y < Height; y++)
+                {
+                    var pos = new Vector2Int(x, y);
+                    if (!positions.Contains(pos))
+                    {
+                        positions.Add(pos);
+                    }
+                }
             }
         }
 
@@ -948,7 +1117,13 @@ namespace MatchRogue
 
         private float ScorePropellerTarget(Vector2Int target, PropellerTargetMode mode, HashSet<Vector2Int> reserved)
         {
-            var score = IsColorTile(board[target.x, target.y]) ? 25f : -60f;
+            var tile = board[target.x, target.y];
+            var score = IsColorTile(tile) ? 25f : -60f;
+            if (tile != null && tile.CrateHealth > 0)
+            {
+                score = 120f + tile.CrateHealth * 40f;
+            }
+
             if (reserved != null)
             {
                 if (reserved.Contains(target))
@@ -2073,6 +2248,12 @@ namespace MatchRogue
                         continue;
                     }
 
+                    if (board[x, y].CrateHealth > 0)
+                    {
+                        writeY = y + 1;
+                        continue;
+                    }
+
                     if (writeY != y)
                     {
                         var tile = board[x, y];
@@ -2818,6 +2999,16 @@ namespace MatchRogue
             Horizontal,
             Vertical,
             Square
+        }
+
+        private enum CrateLayoutTemplate
+        {
+            EdgeRing,
+            CenterBlock,
+            Islands,
+            Channel,
+            DenseCluster,
+            Mixed
         }
 
         private enum PropellerTargetMode
