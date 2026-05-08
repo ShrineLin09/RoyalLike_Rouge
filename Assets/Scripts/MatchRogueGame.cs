@@ -21,6 +21,10 @@ namespace MatchRogue
         private const float FallAnimSecondsPerCell = 0.055f;
         private const float MaxFallAnimSeconds = 0.26f;
         private const float CascadePauseSeconds = 0.08f;
+        private const int RoomsPerRun = 4;
+
+        private static readonly int[] RoomMoveLimits = { 20, 22, 24, 26 };
+        private static readonly int[] RoomTargetScores = { 4500, 8000, 12500, 18000 };
 
         private readonly Color[] tileColors =
         {
@@ -56,15 +60,16 @@ namespace MatchRogue
         private Vector2Int? selected;
         private bool inputLocked;
         private bool upgradePanelOpen;
-        private bool isEndless;
-        private int layer = 1;
         private int room = 1;
+        private int pendingRewardAfterRoom;
         private int score;
+        private int runScore;
         private int baseTargetScore;
         private int targetScore;
         private int movesRemaining;
         private int roomMoveLimit;
         private int comboChain;
+        private int bestComboChain;
         private float tileSpacing = 1f;
         private float tileScale = 0.82f;
         private Vector3 boardOrigin;
@@ -75,7 +80,7 @@ namespace MatchRogue
         private void Awake()
         {
             BuildScene();
-            StartRun(false);
+            StartRun();
         }
 
         private void Update()
@@ -195,13 +200,13 @@ namespace MatchRogue
                 upgradeButtons[i] = CreateButton($"Upgrade {i + 1}", new Vector2(0f, 120f - i * 140f), new Vector2(860f, 108f));
             }
 
-            restartButton = CreateButton("Restart", new Vector2(-230f, -790f), new Vector2(360f, 90f));
+            restartButton = CreateButton("Restart", new Vector2(0f, -790f), new Vector2(420f, 90f));
             restartButton.GetComponentInChildren<Text>().text = "重新开始";
-            restartButton.onClick.AddListener(() => StartRun(isEndless));
+            restartButton.onClick.AddListener(StartRun);
 
             endlessButton = CreateButton("Endless", new Vector2(230f, -790f), new Vector2(360f, 90f));
             endlessButton.GetComponentInChildren<Text>().text = "开始无尽";
-            endlessButton.onClick.AddListener(() => StartRun(true));
+            endlessButton.gameObject.SetActive(false);
 
             SetUpgradePanel(false);
         }
@@ -277,16 +282,19 @@ namespace MatchRogue
             return button;
         }
 
-        private void StartRun(bool endless)
+        private void StartRun()
         {
-            isEndless = endless;
-            layer = 1;
             room = 1;
+            pendingRewardAfterRoom = 0;
             activeUpgrades.Clear();
             selected = null;
             inputLocked = false;
-            endlessButton.GetComponentInChildren<Text>().text = isEndless ? "无尽模式" : "开始无尽";
-            GenerateBoard();
+            score = 0;
+            runScore = 0;
+            bestComboChain = 0;
+            restartButton.GetComponentInChildren<Text>().text = "重新开始";
+            restartButton.gameObject.SetActive(true);
+            endlessButton.gameObject.SetActive(false);
             StartRoom();
         }
 
@@ -294,20 +302,17 @@ namespace MatchRogue
         {
             inputLocked = false;
             selected = null;
+            GenerateBoard();
             RefreshBoardTransforms();
             score = 0;
             comboChain = 0;
-            roomMoveLimit = Mathf.Max(14, 24 - (layer - 1) - Mathf.FloorToInt((room - 1) * 0.5f));
+            var roomIndex = Mathf.Clamp(room - 1, 0, RoomsPerRun - 1);
+            roomMoveLimit = RoomMoveLimits[roomIndex];
             movesRemaining = roomMoveLimit;
-            baseTargetScore = Mathf.RoundToInt((950 + room * 170 + layer * 260) * GetDifficultyMultiplier());
+            baseTargetScore = RoomTargetScores[roomIndex];
             targetScore = GetAdjustedTargetScore();
             SetUpgradePanel(false);
             RefreshStatus();
-        }
-
-        private float GetDifficultyMultiplier()
-        {
-            return 1f + (layer - 1) * 0.18f + (room - 1) * 0.06f;
         }
 
         private void GenerateBoard()
@@ -956,6 +961,8 @@ namespace MatchRogue
             var scoreGain = clearCount * 80;
             scoreGain += comboChain > 1 ? comboChain * 40 : 0;
             score += scoreGain;
+            runScore += scoreGain;
+            bestComboChain = Mathf.Max(bestComboChain, comboChain);
         }
 
         private void ResolveClearSet(HashSet<Vector2Int> baseClears, PendingSpecial? specialToCreate, bool expandSpecials = true)
@@ -1728,27 +1735,23 @@ namespace MatchRogue
         private void CompleteRoom()
         {
             inputLocked = true;
-            if (room >= 5)
+            if (room >= RoomsPerRun)
             {
-                layer++;
-                room = 1;
-            }
-            else
-            {
-                room++;
+                ShowRunSummary(true, RoomsPerRun);
+                return;
             }
 
+            pendingRewardAfterRoom = room;
+            room++;
             ShowUpgradeChoices();
         }
 
         private void ShowUpgradeChoices()
         {
-            upgradeText.text = isEndless
-                ? $"第 {layer} 层奖励"
-                : room == 1 ? "进入下一大关" : $"第 {room - 1} 小关完成";
+            upgradeText.text = $"第 {pendingRewardAfterRoom} 关完成\n选择一个技能进入第 {room} 关";
 
             SetUpgradePanel(true);
-            var choices = RollUpgradeChoices();
+            var choices = RollUpgradeChoices(pendingRewardAfterRoom);
             for (var i = 0; i < upgradeButtons.Length; i++)
             {
                 if (i >= choices.Length)
@@ -1771,7 +1774,7 @@ namespace MatchRogue
             }
         }
 
-        private RogueUpgrade[] RollUpgradeChoices()
+        private RogueUpgrade[] RollUpgradeChoices(int completedRoom)
         {
             var pool = GetUpgradePool()
                 .Where(upgrade => GetUpgradeLevel(upgrade.Kind) < upgrade.MaxLevel)
@@ -1786,6 +1789,20 @@ namespace MatchRogue
             }
 
             var choices = new List<RogueUpgrade>();
+            if (completedRoom == 1)
+            {
+                var coreChoices = pool
+                    .Where(upgrade => upgrade.IsCore)
+                    .OrderBy(_ => rng.Next())
+                    .ToList();
+                if (coreChoices.Count > 0)
+                {
+                    var forcedCore = coreChoices[0];
+                    choices.Add(forcedCore);
+                    pool.RemoveAll(upgrade => upgrade.Kind == forcedCore.Kind);
+                }
+            }
+
             while (choices.Count < upgradeButtons.Length && pool.Count > 0)
             {
                 var picked = PickWeightedUpgrade(pool);
@@ -1816,21 +1833,28 @@ namespace MatchRogue
         {
             if (upgrade.Faction == UpgradeFaction.General)
             {
-                return 18f;
+                return pendingRewardAfterRoom <= 1 ? 12f : 18f;
             }
 
             if (upgrade.Faction == UpgradeFaction.Bridge)
             {
-                return HasAnyCore() ? 10f + activeUpgrades.Select(active => active.Faction).Distinct().Count() * 3f : 0f;
+                if (!HasAnyCore())
+                {
+                    return 0f;
+                }
+
+                var bridgeRoomBonus = pendingRewardAfterRoom >= 3 ? 16f : 6f;
+                return bridgeRoomBonus + GetActiveBuildFactionCount() * 5f;
             }
 
             if (upgrade.IsCore)
             {
-                return HasAnyCore() ? 14f : 70f;
+                return HasAnyCore() ? 22f : 95f;
             }
 
             var factionLevel = GetFactionInvestment(upgrade.Faction);
-            return 45f + factionLevel * 18f;
+            var roomBonus = pendingRewardAfterRoom >= 2 ? 18f : 0f;
+            return 62f + factionLevel * 28f + roomBonus;
         }
 
         private bool IsUpgradeUnlocked(RogueUpgrade upgrade)
@@ -1854,6 +1878,15 @@ namespace MatchRogue
         private int GetFactionInvestment(UpgradeFaction faction)
         {
             return activeUpgrades.Count(upgrade => upgrade.Faction == faction);
+        }
+
+        private int GetActiveBuildFactionCount()
+        {
+            return activeUpgrades
+                .Where(upgrade => IsBuildFaction(upgrade.Faction))
+                .Select(upgrade => upgrade.Faction)
+                .Distinct()
+                .Count();
         }
 
         private int GetUpgradeLevel(UpgradeKind kind)
@@ -1904,23 +1937,37 @@ namespace MatchRogue
 
         private void FailRun()
         {
+            ShowRunSummary(false, room);
+        }
+
+        private void ShowRunSummary(bool success, int reachedRoom)
+        {
             inputLocked = true;
             SetUpgradePanel(false);
             upgradeText.gameObject.SetActive(true);
-            upgradeText.text = isEndless
-                ? $"挑战结束：第 {layer} 层，第 {room} 小关"
-                : "小关失败，再试一次。";
+            restartButton.gameObject.SetActive(true);
+            restartButton.GetComponentInChildren<Text>().text = "再来一局";
+            endlessButton.gameObject.SetActive(false);
+
+            var completedRooms = success ? RoomsPerRun : Mathf.Max(0, reachedRoom - 1);
+            upgradeText.text =
+                $"{(success ? "Run 通关！" : "Run 失败")}\n" +
+                $"进度：第 {reachedRoom}/{RoomsPerRun} 关（已完成 {completedRooms} 关）\n" +
+                $"主要流派：{GetMainBuildName()}\n" +
+                $"本局技能：{FormatActiveUpgrades()}\n" +
+                $"总分 {runScore} / 最高连锁 {Mathf.Max(1, bestComboChain)}";
         }
 
         private void RefreshStatus()
         {
             targetScore = GetAdjustedTargetScore();
             statusText.text =
-                $"{(isEndless ? "无尽挑战" : "原型闯关")}  第 {layer} 层 / 第 {room}/5 小关\n" +
+                $"短Run  第 {room}/{RoomsPerRun} 关\n" +
                 $"分数 {score} / {targetScore}\n" +
                 $"剩余步数 {movesRemaining} / {roomMoveLimit}\n" +
+                $"Run总分 {runScore} / 最高连锁 {Mathf.Max(1, bestComboChain)}\n" +
                 $"已选强化：{FormatActiveUpgrades()}\n" +
-                "交换相邻棋子，在步数耗尽前达到目标分数。";
+                GetRoomGoalText();
         }
 
         private string FormatActiveUpgrades()
@@ -1936,6 +1983,68 @@ namespace MatchRogue
                     string.Join("、", factionGroup
                         .GroupBy(upgrade => upgrade.Name)
                         .Select(group => group.Count() > 1 ? $"{group.Key} Lv.{group.Count()}" : group.Key))));
+        }
+
+        private string GetRoomGoalText()
+        {
+            switch (room)
+            {
+                case 1:
+                    return "第1关：普通启动关，通关后必出核心技能。";
+                case 2:
+                    return "第2关：Build启动关，观察核心技能变化。";
+                case 3:
+                    return "第3关：Build成型关，利用流派效果冲分。";
+                default:
+                    return "第4关：高潮关，让这一把的Build表演起来。";
+            }
+        }
+
+        private string GetMainBuildName()
+        {
+            var factionCounts = activeUpgrades
+                .Where(upgrade => IsBuildFaction(upgrade.Faction))
+                .GroupBy(upgrade => upgrade.Faction)
+                .Select(group => new { Faction = group.Key, Count = group.Count() })
+                .OrderByDescending(group => group.Count)
+                .ToList();
+
+            if (factionCounts.Count == 0)
+            {
+                return "未成型";
+            }
+
+            if (factionCounts.Count > 1 && factionCounts[0].Count == factionCounts[1].Count)
+            {
+                return "混合流";
+            }
+
+            return GetFactionBuildName(factionCounts[0].Faction);
+        }
+
+        private bool IsBuildFaction(UpgradeFaction faction)
+        {
+            return faction == UpgradeFaction.Explosion ||
+                   faction == UpgradeFaction.Rocket ||
+                   faction == UpgradeFaction.Rainbow ||
+                   faction == UpgradeFaction.Propeller;
+        }
+
+        private string GetFactionBuildName(UpgradeFaction faction)
+        {
+            switch (faction)
+            {
+                case UpgradeFaction.Explosion:
+                    return "爆炸流";
+                case UpgradeFaction.Rocket:
+                    return "火箭流";
+                case UpgradeFaction.Rainbow:
+                    return "彩虹流";
+                case UpgradeFaction.Propeller:
+                    return "螺旋桨流";
+                default:
+                    return "混合流";
+            }
         }
 
         private bool IsPointerOverUi()
