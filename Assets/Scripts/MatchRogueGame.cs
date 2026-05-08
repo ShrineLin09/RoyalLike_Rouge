@@ -672,23 +672,31 @@ namespace MatchRogue
         {
             var target = GetPropellerTarget();
             AddCross(a, clearSet);
-            clearSet.Add(target);
             if (partnerSpecial == SpecialKind.Bomb)
             {
-                AddCross(target, clearSet);
-                AddDiagonalCorners(target, clearSet);
+                AddBombClear(target, clearSet);
             }
             else if (IsRocket(partnerSpecial))
             {
-                AddRow(target.y, clearSet);
-                AddColumn(target.x, clearSet);
+                if (partnerSpecial == SpecialKind.LineHorizontal)
+                {
+                    AddRow(target.y, clearSet);
+                }
+                else
+                {
+                    AddColumn(target.x, clearSet);
+                }
             }
             else if (partnerSpecial == SpecialKind.Propeller)
             {
-                for (var i = 0; i < 2; i++)
+                for (var i = 0; i < 3; i++)
                 {
-                    AddCross(GetPropellerTarget(), clearSet);
+                    clearSet.Add(GetPropellerTarget());
                 }
+            }
+            else
+            {
+                clearSet.Add(target);
             }
 
             AwardScoreForClears(clearSet.Count);
@@ -1257,7 +1265,10 @@ namespace MatchRogue
             if (GetUpgradeLevel(UpgradeKind.PropellerSwarm) > 0 && UnityEngine.Random.value < GetChanceByLevel(GetUpgradeLevel(UpgradeKind.PropellerSwarm), 0.25f, 0.45f, 0.45f))
             {
                 ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.PropellerSwarm));
-                output.Add(GetPropellerTarget());
+                for (var i = 0; i < GetUpgradeLevel(UpgradeKind.PropellerSwarm); i++)
+                {
+                    output.Add(GetPropellerTarget());
+                }
             }
         }
 
