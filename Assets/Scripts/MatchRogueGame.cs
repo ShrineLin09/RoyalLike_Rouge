@@ -357,6 +357,7 @@ namespace MatchRogue
                 Destroy(tile.Object.transform.GetChild(i).gameObject);
             }
 
+            SetTileBaseColor(tile);
             switch (tile.Special)
             {
                 case SpecialKind.LineHorizontal:
@@ -688,7 +689,7 @@ namespace MatchRogue
             {
                 for (var y = 0; y < Height; y++)
                 {
-                    if (board[x, y] != null && board[x, y].Type == targetType)
+                    if (IsColorTile(board[x, y]) && board[x, y].Type == targetType)
                     {
                         result.Add(new Vector2Int(x, y));
                     }
@@ -1031,6 +1032,19 @@ namespace MatchRogue
             DecorateTile(board[pos.x, pos.y]);
         }
 
+        private void SetTileBaseColor(Tile tile)
+        {
+            var renderer = tile.Object.GetComponent<MeshRenderer>();
+            if (renderer == null)
+            {
+                return;
+            }
+
+            renderer.material.color = tile.Special == SpecialKind.None
+                ? tileColors[tile.Type]
+                : new Color(0.92f, 0.88f, 0.72f);
+        }
+
         private void ApplyGravity()
         {
             for (var x = 0; x < Width; x++)
@@ -1288,7 +1302,12 @@ namespace MatchRogue
 
         private bool HasSameMatchColor(Tile first, Tile second)
         {
-            return first != null && second != null && first.Type == second.Type;
+            return IsColorTile(first) && IsColorTile(second) && first.Type == second.Type;
+        }
+
+        private bool IsColorTile(Tile tile)
+        {
+            return tile != null && tile.Special == SpecialKind.None;
         }
 
         private bool IsRocket(SpecialKind special)
