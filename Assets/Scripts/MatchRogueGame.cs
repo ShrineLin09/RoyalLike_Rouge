@@ -993,13 +993,25 @@ namespace MatchRogue
 
         private void ExpandSpecialClears(HashSet<Vector2Int> baseClears, HashSet<Vector2Int> output)
         {
-            foreach (var pos in baseClears.ToArray())
+            var expandedSpecials = new HashSet<Vector2Int>();
+            var queue = baseClears.Where(IsSpecialTile).ToList();
+            var index = 0;
+
+            while (index < queue.Count)
             {
+                var pos = queue[index++];
                 if (!IsInside(pos) || board[pos.x, pos.y] == null)
                 {
                     continue;
                 }
 
+                if (expandedSpecials.Contains(pos))
+                {
+                    continue;
+                }
+
+                expandedSpecials.Add(pos);
+                var before = output.Count;
                 var tile = board[pos.x, pos.y];
                 switch (tile.Special)
                 {
@@ -1016,6 +1028,11 @@ namespace MatchRogue
                         AddTilesOfType(GetMostCommonTileType(), output);
                         ApplyRainbowBonusClears(pos, output);
                         break;
+                }
+
+                if (output.Count != before)
+                {
+                    queue = output.Where(IsSpecialTile).ToList();
                 }
             }
         }
@@ -1066,45 +1083,6 @@ namespace MatchRogue
             }
 
             AddRadius(pos, radius, output);
-            if (GetUpgradeLevel(UpgradeKind.BombChain) <= 0)
-            {
-                return;
-            }
-
-            var chained = new HashSet<Vector2Int> { pos };
-            var searchIndex = 0;
-            var queue = output.Where(IsSpecialTile).ToList();
-            while (searchIndex < queue.Count)
-            {
-                var chainPos = queue[searchIndex++];
-                if (chained.Contains(chainPos))
-                {
-                    continue;
-                }
-
-                chained.Add(chainPos);
-                var before = output.Count;
-                switch (board[chainPos.x, chainPos.y].Special)
-                {
-                    case SpecialKind.Bomb:
-                        AddRadius(chainPos, radius, output);
-                        break;
-                    case SpecialKind.LineHorizontal:
-                        AddRocketClear(chainPos, MatchOrientation.Horizontal, output);
-                        break;
-                    case SpecialKind.LineVertical:
-                        AddRocketClear(chainPos, MatchOrientation.Vertical, output);
-                        break;
-                    case SpecialKind.Rainbow:
-                        AddTilesOfType(GetMostCommonTileType(), output);
-                        break;
-                }
-
-                if (output.Count != before)
-                {
-                    queue = output.Where(IsSpecialTile).ToList();
-                }
-            }
         }
 
         private void ApplyRainbowBonusClears(Vector2Int pos, HashSet<Vector2Int> output)
