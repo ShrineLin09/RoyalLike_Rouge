@@ -59,6 +59,7 @@ namespace MatchRogue
         private Texture2D rainbowIcon;
         private Texture2D propellerIcon;
         private Texture2D backgroundTexture;
+        private Texture2D crateTexture;
         private Coroutine triggerTextRoutine;
 
         private Vector2Int? selected;
@@ -153,6 +154,7 @@ namespace MatchRogue
         private void LoadBackgroundTexture()
         {
             backgroundTexture = Resources.Load<Texture2D>("Backgrounds/SciFiSpace");
+            crateTexture = Resources.Load<Texture2D>("Targets/Crate");
         }
 
         private void ConfigureCameraAndBoardLayout()
@@ -465,6 +467,13 @@ namespace MatchRogue
             }
 
             SetTileBaseColor(tile);
+
+            if (tile.CrateHealth > 0)
+            {
+                AddCrateOverlay(tile);
+                return;
+            }
+
             switch (tile.Special)
             {
                 case SpecialKind.LineHorizontal:
@@ -483,21 +492,14 @@ namespace MatchRogue
                     AddTileIcon(tile, "PropellerIcon", propellerIcon);
                     break;
             }
-
-            if (tile.CrateHealth > 0)
-            {
-                AddCrateOverlay(tile);
-            }
         }
 
         private void AddCrateOverlay(Tile tile)
         {
-            AddTileMark(tile, "CrateBase", tile.CrateHealth > 1 ? new Color(0.54f, 0.30f, 0.12f) : new Color(0.66f, 0.42f, 0.20f), new Vector3(0.78f, 0.78f, 1f), Vector3.zero);
-            AddTileMark(tile, "CrateBandH", new Color(0.28f, 0.16f, 0.08f), new Vector3(0.78f, 0.10f, 1f), Vector3.zero);
-            AddTileMark(tile, "CrateBandV", new Color(0.28f, 0.16f, 0.08f), new Vector3(0.10f, 0.78f, 1f), Vector3.zero);
+            AddTileIcon(tile, "CrateIcon", crateTexture);
             if (tile.CrateHealth > 1)
             {
-                AddTileMark(tile, "CrateLayer", new Color(0.95f, 0.78f, 0.32f), new Vector3(0.24f, 0.24f, 1f), new Vector3(0.22f, 0.22f, 0f));
+                AddTileMark(tile, "CrateLayer", new Color(0.98f, 0.78f, 0.24f), new Vector3(0.18f, 0.18f, 1f), new Vector3(0.22f, 0.22f, 0f));
             }
         }
 
@@ -1193,6 +1195,15 @@ namespace MatchRogue
 
             foreach (var tile in clearedTiles)
             {
+                if (selected.HasValue && tile.Object != null)
+                {
+                    var selectedTile = IsInside(selected.Value) ? board[selected.Value.x, selected.Value.y] : null;
+                    if (selectedTile == tile)
+                    {
+                        selected = null;
+                    }
+                }
+
                 if (tile.Object != null)
                 {
                     Destroy(tile.Object);
@@ -1259,6 +1270,12 @@ namespace MatchRogue
             tile.CrateHealth--;
             if (tile.CrateHealth <= 0)
             {
+                if (selected.HasValue && selected.Value == pos)
+                {
+                    selected = null;
+                }
+
+                tile.Object.transform.localScale = Vector3.one * tileScale;
                 remainingCrates = Mathf.Max(0, remainingCrates - 1);
                 StartCoroutine(AnimateCrateBreak(tile));
                 return true;
@@ -1990,6 +2007,12 @@ namespace MatchRogue
                 return;
             }
 
+            if (tile.CrateHealth > 0)
+            {
+                renderer.material.color = new Color(0.08f, 0.055f, 0.035f);
+                return;
+            }
+
             renderer.material.color = tile.Special == SpecialKind.None
                 ? tileColors[tile.Type]
                 : new Color(0.92f, 0.88f, 0.72f);
@@ -1997,6 +2020,11 @@ namespace MatchRogue
 
         private Color GetTileDisplayColor(Tile tile)
         {
+            if (tile.CrateHealth > 0)
+            {
+                return new Color(0.52f, 0.30f, 0.14f);
+            }
+
             return tile.Special == SpecialKind.None
                 ? tileColors[tile.Type]
                 : new Color(0.92f, 0.88f, 0.72f);
