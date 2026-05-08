@@ -641,6 +641,17 @@ namespace MatchRogue
             }
         }
 
+        private void ClearSelectionIfAt(Vector2Int grid)
+        {
+            if (!selected.HasValue || selected.Value != grid)
+            {
+                return;
+            }
+
+            Deselect(grid);
+            selected = null;
+        }
+
         private void TrySwap(Vector2Int a, Vector2Int b)
         {
             SwapTiles(a, b);
@@ -1176,6 +1187,7 @@ namespace MatchRogue
                     continue;
                 }
 
+                ClearSelectionIfAt(pos);
                 clearedTiles.Add(board[pos.x, pos.y]);
                 board[pos.x, pos.y] = null;
             }
@@ -1205,15 +1217,6 @@ namespace MatchRogue
 
             foreach (var tile in clearedTiles)
             {
-                if (selected.HasValue && tile.Object != null)
-                {
-                    var selectedTile = IsInside(selected.Value) ? board[selected.Value.x, selected.Value.y] : null;
-                    if (selectedTile == tile)
-                    {
-                        selected = null;
-                    }
-                }
-
                 if (tile.Object != null)
                 {
                     Destroy(tile.Object);
@@ -1276,15 +1279,11 @@ namespace MatchRogue
 
         private bool DamageCrate(Vector2Int pos)
         {
+            ClearSelectionIfAt(pos);
             var tile = board[pos.x, pos.y];
             tile.CrateHealth--;
             if (tile.CrateHealth <= 0)
             {
-                if (selected.HasValue && selected.Value == pos)
-                {
-                    selected = null;
-                }
-
                 tile.Object.transform.localScale = Vector3.one * tileScale;
                 remainingCrates = Mathf.Max(0, remainingCrates - 1);
                 StartCoroutine(AnimateCrateBreak(tile));
