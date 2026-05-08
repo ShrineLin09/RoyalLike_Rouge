@@ -671,11 +671,12 @@ namespace MatchRogue
         private void ResolvePropellerCombination(Vector2Int a, Vector2Int b, SpecialKind partnerSpecial, HashSet<Vector2Int> clearSet)
         {
             var target = GetPropellerTarget();
+            AddCross(a, clearSet);
             clearSet.Add(target);
-            AddRadius(target, 1, clearSet);
             if (partnerSpecial == SpecialKind.Bomb)
             {
-                AddRadius(target, 2, clearSet);
+                AddCross(target, clearSet);
+                AddDiagonalCorners(target, clearSet);
             }
             else if (IsRocket(partnerSpecial))
             {
@@ -686,7 +687,7 @@ namespace MatchRogue
             {
                 for (var i = 0; i < 2; i++)
                 {
-                    AddRadius(GetPropellerTarget(), 1, clearSet);
+                    AddCross(GetPropellerTarget(), clearSet);
                 }
             }
 
@@ -912,6 +913,47 @@ namespace MatchRogue
         private void AddNeighbors(Vector2Int center, HashSet<Vector2Int> output)
         {
             AddRadius(center, 1, output);
+        }
+
+        private void AddCross(Vector2Int center, HashSet<Vector2Int> output)
+        {
+            output.Add(center);
+            var offsets = new[]
+            {
+                new Vector2Int(1, 0),
+                new Vector2Int(-1, 0),
+                new Vector2Int(0, 1),
+                new Vector2Int(0, -1)
+            };
+
+            foreach (var offset in offsets)
+            {
+                var pos = center + offset;
+                if (IsInside(pos))
+                {
+                    output.Add(pos);
+                }
+            }
+        }
+
+        private void AddDiagonalCorners(Vector2Int center, HashSet<Vector2Int> output)
+        {
+            var offsets = new[]
+            {
+                new Vector2Int(1, 1),
+                new Vector2Int(1, -1),
+                new Vector2Int(-1, 1),
+                new Vector2Int(-1, -1)
+            };
+
+            foreach (var offset in offsets)
+            {
+                var pos = center + offset;
+                if (IsInside(pos))
+                {
+                    output.Add(pos);
+                }
+            }
         }
 
         private void AddRadius(Vector2Int center, int radius, HashSet<Vector2Int> output)
@@ -1204,13 +1246,18 @@ namespace MatchRogue
         private void AddPropellerClear(Vector2Int pos, HashSet<Vector2Int> output)
         {
             var target = GetPropellerTarget();
-            output.Add(pos);
+            AddCross(pos, output);
             output.Add(target);
-            AddRadius(target, GetUpgradeLevel(UpgradeKind.PropellerBlast) > 0 ? 1 + GetUpgradeLevel(UpgradeKind.PropellerBlast) : 1, output);
+            if (GetUpgradeLevel(UpgradeKind.PropellerBlast) > 0)
+            {
+                ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.PropellerBlast));
+                AddCross(target, output);
+            }
+
             if (GetUpgradeLevel(UpgradeKind.PropellerSwarm) > 0 && UnityEngine.Random.value < GetChanceByLevel(GetUpgradeLevel(UpgradeKind.PropellerSwarm), 0.25f, 0.45f, 0.45f))
             {
                 ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.PropellerSwarm));
-                AddRadius(GetPropellerTarget(), 1, output);
+                output.Add(GetPropellerTarget());
             }
         }
 
