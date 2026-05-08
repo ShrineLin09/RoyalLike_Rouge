@@ -238,7 +238,9 @@ namespace MatchRogue
             canvasObject.AddComponent<GraphicRaycaster>();
             EnsureEventSystem();
 
-            statusText = CreateText("Status", new Vector2(32f, -132f), new Vector2(760f, 250f), 28, TextAnchor.UpperLeft);
+            statusText = CreateText("Status", new Vector2(32f, -132f), new Vector2(840f, 320f), 34, TextAnchor.UpperLeft);
+            statusText.fontStyle = FontStyle.Bold;
+            AddTextOutline(statusText, Color.black, new Vector2(3f, -3f));
             statusRect = statusText.GetComponent<RectTransform>();
             statusRect.anchorMin = new Vector2(0f, 1f);
             statusRect.anchorMax = new Vector2(0f, 1f);
@@ -297,6 +299,14 @@ namespace MatchRogue
             text.horizontalOverflow = HorizontalWrapMode.Wrap;
             text.verticalOverflow = VerticalWrapMode.Overflow;
             return text;
+        }
+
+        private void AddTextOutline(Text text, Color color, Vector2 distance)
+        {
+            var outline = text.gameObject.AddComponent<Outline>();
+            outline.effectColor = color;
+            outline.effectDistance = distance;
+            outline.useGraphicAlpha = true;
         }
 
         private Button CreateButton(string name, Vector2 anchoredPosition, Vector2 size)
