@@ -25,6 +25,8 @@ namespace MatchRogue
 
         private static readonly int[] RoomMoveLimits = { 30, 28, 26, 24 };
         private static readonly int[] RoomTargetScores = { 10500, 16500, 26000, 42000 };
+        private static readonly int[] RoomCrateCounts = { 8, 12, 16, 22 };
+        private static readonly float[] RoomTwoLayerCrateRates = { 0f, 0.2f, 0.4f, 0.55f };
 
         private readonly Color[] tileColors =
         {
@@ -68,6 +70,8 @@ namespace MatchRogue
         private int runScore;
         private int baseTargetScore;
         private int targetScore;
+        private int totalCrates;
+        private int remainingCrates;
         private int movesRemaining;
         private int roomMoveLimit;
         private int comboChain;
@@ -361,6 +365,7 @@ namespace MatchRogue
             inputLocked = false;
             selected = null;
             GenerateBoard();
+            PlaceRoomCrates();
             SeedShowcaseSpecialsForRoom();
             RefreshBoardTransforms();
             score = 0;
@@ -377,6 +382,8 @@ namespace MatchRogue
         private void GenerateBoard()
         {
             ClearTiles();
+            totalCrates = 0;
+            remainingCrates = 0;
 
             for (var x = 0; x < Width; x++)
             {
@@ -385,6 +392,30 @@ namespace MatchRogue
                     var type = RollTileTypeAvoidingMatch(x, y);
                     board[x, y] = CreateTile(x, y, type);
                 }
+            }
+        }
+
+        private void PlaceRoomCrates()
+        {
+            var roomIndex = Mathf.Clamp(room - 1, 0, RoomsPerRun - 1);
+            var positions = new List<Vector2Int>();
+            for (var x = 1; x < Width - 1; x++)
+            {
+                for (var y = 1; y < Height - 1; y++)
+                {
+                    positions.Add(new Vector2Int(x, y));
+                }
+            }
+
+            positions = positions.OrderBy(_ => rng.Next()).ToList();
+            totalCrates = Mathf.Min(RoomCrateCounts[roomIndex], positions.Count);
+            remainingCrates = totalCrates;
+            for (var i = 0; i < totalCrates; i++)
+            {
+                var pos = positions[i];
+                var health = rng.NextDouble() < RoomTwoLayerCrateRates[roomIndex] ? 2 : 1;
+                board[pos.x, pos.y].CrateHealth = health;
+                DecorateTile(board[pos.x, pos.y]);
             }
         }
 
@@ -451,6 +482,22 @@ namespace MatchRogue
                 case SpecialKind.Propeller:
                     AddTileIcon(tile, "PropellerIcon", propellerIcon);
                     break;
+            }
+
+            if (tile.CrateHealth > 0)
+            {
+                AddCrateOverlay(tile);
+            }
+        }
+
+        private void AddCrateOverlay(Tile tile)
+        {
+            AddTileMark(tile, "CrateBase", tile.CrateHealth > 1 ? new Color(0.54f, 0.30f, 0.12f) : new Color(0.66f, 0.42f, 0.20f), new Vector3(0.78f, 0.78f, 1f), Vector3.zero);
+            AddTileMark(tile, "CrateBandH", new Color(0.28f, 0.16f, 0.08f), new Vector3(0.78f, 0.10f, 1f), Vector3.zero);
+            AddTileMark(tile, "CrateBandV", new Color(0.28f, 0.16f, 0.08f), new Vector3(0.10f, 0.78f, 1f), Vector3.zero);
+            if (tile.CrateHealth > 1)
+            {
+                AddTileMark(tile, "CrateLayer", new Color(0.95f, 0.78f, 0.32f), new Vector3(0.24f, 0.24f, 1f), new Vector3(0.22f, 0.22f, 0f));
             }
         }
 
@@ -1060,6 +1107,7 @@ namespace MatchRogue
                     bonusClears.Remove(currentSpecial.Value.Position);
                 }
 
+                DamageCratesForClears(currentClears, bonusClears);
                 yield return AnimateAndRemoveClears(bonusClears);
 
                 if (currentSpecial.HasValue)
@@ -1094,7 +1142,7 @@ namespace MatchRogue
             comboChain = 0;
             inputLocked = false;
 
-            if (score >= targetScore)
+            if (remainingCrates <= 0)
             {
                 CompleteRoom();
                 yield break;
@@ -1150,6 +1198,103 @@ namespace MatchRogue
                     Destroy(tile.Object);
                 }
             }
+        }
+
+        private void DamageCratesForClears(HashSet<Vector2Int> directClears, HashSet<Vector2Int> finalClears)
+        {
+            var crateHits = new HashSet<Vector2Int>();
+            foreach (var pos in finalClears)
+            {
+                crateHits.Add(pos);
+            }
+
+            foreach (var pos in directClears)
+            {
+                AddAdjacentCrates(pos, crateHits);
+            }
+
+            foreach (var pos in crateHits)
+            {
+                if (!IsInside(pos) || board[pos.x, pos.y] == null || board[pos.x, pos.y].CrateHealth <= 0)
+                {
+                    continue;
+                }
+
+                var wasScheduledToClear = finalClears.Contains(pos);
+                var destroyed = DamageCrate(pos);
+                if (!destroyed)
+                {
+                    finalClears.Remove(pos);
+                }
+                else if (!wasScheduledToClear && board[pos.x, pos.y] != null)
+                {
+                    DecorateTile(board[pos.x, pos.y]);
+                }
+            }
+        }
+
+        private void AddAdjacentCrates(Vector2Int center, HashSet<Vector2Int> output)
+        {
+            var offsets = new[]
+            {
+                new Vector2Int(1, 0),
+                new Vector2Int(-1, 0),
+                new Vector2Int(0, 1),
+                new Vector2Int(0, -1)
+            };
+
+            foreach (var offset in offsets)
+            {
+                var pos = center + offset;
+                if (IsInside(pos) && board[pos.x, pos.y] != null && board[pos.x, pos.y].CrateHealth > 0)
+                {
+                    output.Add(pos);
+                }
+            }
+        }
+
+        private bool DamageCrate(Vector2Int pos)
+        {
+            var tile = board[pos.x, pos.y];
+            tile.CrateHealth--;
+            if (tile.CrateHealth <= 0)
+            {
+                remainingCrates = Mathf.Max(0, remainingCrates - 1);
+                StartCoroutine(AnimateCrateBreak(tile));
+                return true;
+            }
+
+            StartCoroutine(AnimateCrateHit(tile));
+            DecorateTile(tile);
+            return false;
+        }
+
+        private IEnumerator AnimateCrateHit(Tile tile)
+        {
+            if (tile?.Object == null)
+            {
+                yield break;
+            }
+
+            var original = tile.Object.transform.localScale;
+            tile.Object.transform.localScale = original * 1.12f;
+            yield return new WaitForSeconds(0.06f);
+            if (tile.Object != null)
+            {
+                tile.Object.transform.localScale = original;
+            }
+        }
+
+        private IEnumerator AnimateCrateBreak(Tile tile)
+        {
+            if (tile?.Object == null)
+            {
+                yield break;
+            }
+
+            var original = tile.Object.transform.localScale;
+            tile.Object.transform.localScale = original * 1.2f;
+            yield return new WaitForSeconds(0.05f);
         }
 
         private void AddNeighbors(Vector2Int center, HashSet<Vector2Int> output)
@@ -2198,7 +2343,8 @@ namespace MatchRogue
             targetScore = GetAdjustedTargetScore();
             statusText.text =
                 $"短Run  第 {room}/{RoomsPerRun} 关\n" +
-                $"分数 {score} / {targetScore}\n" +
+                $"目标：清除木箱  剩余 {remainingCrates}/{totalCrates}\n" +
+                $"分数 {score}\n" +
                 $"剩余步数 {movesRemaining} / {roomMoveLimit}\n" +
                 $"Run总分 {runScore} / 最高连锁 {Mathf.Max(1, bestComboChain)}\n" +
                 $"已选强化：{FormatActiveUpgrades()}\n" +
@@ -2225,13 +2371,13 @@ namespace MatchRogue
             switch (room)
             {
                 case 1:
-                    return "第1关：普通启动关，通关后必出核心技能。";
+                    return "第1关：清掉少量木箱，通关后必出核心技能。";
                 case 2:
-                    return "第2关：Build启动关，观察核心技能变化。";
+                    return "第2关：木箱变多，观察核心技能清目标。";
                 case 3:
-                    return "第3关：Build成型关，利用流派效果冲分。";
+                    return "第3关：利用Build处理更多双层木箱。";
                 default:
-                    return "第4关：高潮关，让这一把的Build表演起来。";
+                    return "第4关：清空最多木箱，让Build表演起来。";
             }
         }
 
@@ -2500,6 +2646,7 @@ namespace MatchRogue
 
             public int Type { get; }
             public SpecialKind Special { get; set; }
+            public int CrateHealth { get; set; }
             public GameObject Object { get; }
         }
 
