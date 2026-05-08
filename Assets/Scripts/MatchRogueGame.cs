@@ -490,12 +490,7 @@ namespace MatchRogue
 
         private bool CanSwapTiles(Vector2Int from, Vector2Int to)
         {
-            if (Mathf.Abs(from.x - to.x) + Mathf.Abs(from.y - to.y) == 1)
-            {
-                return true;
-            }
-
-            return IsSpecialTile(from) || IsSpecialTile(to);
+            return Mathf.Abs(from.x - to.x) + Mathf.Abs(from.y - to.y) == 1;
         }
 
         private void Select(Vector2Int grid)
