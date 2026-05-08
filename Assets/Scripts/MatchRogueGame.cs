@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -15,6 +16,11 @@ namespace MatchRogue
         private const int Width = 8;
         private const int Height = 8;
         private const int TileTypes = 6;
+        private const float MatchPauseSeconds = 0.07f;
+        private const float ClearAnimSeconds = 0.18f;
+        private const float FallAnimSecondsPerCell = 0.055f;
+        private const float MaxFallAnimSeconds = 0.26f;
+        private const float CascadePauseSeconds = 0.08f;
 
         private readonly Color[] tileColors =
         {
@@ -729,50 +735,63 @@ namespace MatchRogue
 
         private void ResolveClearSet(HashSet<Vector2Int> baseClears, PendingSpecial? specialToCreate, bool expandSpecials = true)
         {
+            StartCoroutine(ResolveClearSetRoutine(baseClears, specialToCreate, expandSpecials));
+        }
+
+        private IEnumerator ResolveClearSetRoutine(HashSet<Vector2Int> baseClears, PendingSpecial? specialToCreate, bool expandSpecials = true)
+        {
             var bombChance = GetUpgradeValue(UpgradeKind.BombChance);
-            var bonusClears = new HashSet<Vector2Int>(baseClears);
-            if (expandSpecials)
-            {
-                ExpandSpecialClears(baseClears, bonusClears);
-            }
+            var currentClears = baseClears;
+            var currentSpecial = specialToCreate;
+            var currentExpandSpecials = expandSpecials;
 
-            foreach (var pos in baseClears.ToArray())
+            while (true)
             {
-                if (UnityEngine.Random.value * 100f < bombChance)
+                yield return new WaitForSeconds(MatchPauseSeconds);
+
+                var bonusClears = new HashSet<Vector2Int>(currentClears);
+                if (currentExpandSpecials)
                 {
-                    AddNeighbors(pos, bonusClears);
-                }
-            }
-
-            if (specialToCreate.HasValue)
-            {
-                bonusClears.Remove(specialToCreate.Value.Position);
-            }
-
-            foreach (var pos in bonusClears)
-            {
-                if (!IsInside(pos) || board[pos.x, pos.y] == null)
-                {
-                    continue;
+                    ExpandSpecialClears(currentClears, bonusClears);
                 }
 
-                Destroy(board[pos.x, pos.y].Object);
-                board[pos.x, pos.y] = null;
-            }
+                foreach (var pos in currentClears.ToArray())
+                {
+                    if (UnityEngine.Random.value * 100f < bombChance)
+                    {
+                        AddNeighbors(pos, bonusClears);
+                    }
+                }
 
-            if (specialToCreate.HasValue)
-            {
-                CreateSpecialTileAt(specialToCreate.Value);
-            }
+                if (currentSpecial.HasValue)
+                {
+                    bonusClears.Remove(currentSpecial.Value.Position);
+                }
 
-            ApplyGravity();
-            RefillBoard();
+                yield return AnimateAndRemoveClears(bonusClears);
 
-            var cascades = FindMatchGroups();
-            if (cascades.Count > 0)
-            {
-                ResolveMatches(cascades, GetPreferredSpecialSpawn(null, null, cascades));
-                return;
+                if (currentSpecial.HasValue)
+                {
+                    CreateSpecialTileAt(currentSpecial.Value);
+                }
+
+                var fallMoves = ApplyGravity();
+                var spawnMoves = RefillBoard();
+                fallMoves.AddRange(spawnMoves);
+                yield return AnimateFalls(fallMoves);
+                yield return new WaitForSeconds(CascadePauseSeconds);
+
+                var cascades = FindMatchGroups();
+                if (cascades.Count == 0)
+                {
+                    break;
+                }
+
+                comboChain++;
+                currentClears = new HashSet<Vector2Int>(cascades.SelectMany(group => group.Positions));
+                currentSpecial = DetermineSpecialKind(cascades, GetPreferredSpecialSpawn(null, null, cascades));
+                currentExpandSpecials = true;
+                AwardScoreForClears(currentClears.Count);
             }
 
             comboChain = 0;
@@ -781,12 +800,58 @@ namespace MatchRogue
             if (score >= targetScore)
             {
                 CompleteRoom();
-                return;
+                yield break;
             }
 
             if (movesRemaining <= 0)
             {
                 FailRun();
+            }
+        }
+
+        private IEnumerator AnimateAndRemoveClears(HashSet<Vector2Int> clears)
+        {
+            var clearedTiles = new List<Tile>();
+            foreach (var pos in clears)
+            {
+                if (!IsInside(pos) || board[pos.x, pos.y] == null)
+                {
+                    continue;
+                }
+
+                clearedTiles.Add(board[pos.x, pos.y]);
+                board[pos.x, pos.y] = null;
+            }
+
+            for (var elapsed = 0f; elapsed < ClearAnimSeconds; elapsed += Time.deltaTime)
+            {
+                var t = Mathf.Clamp01(elapsed / ClearAnimSeconds);
+                var scale = Mathf.Lerp(tileScale * 1.12f, 0.08f, EaseInBack(t));
+                var flash = Mathf.Sin(t * Mathf.PI);
+                foreach (var tile in clearedTiles)
+                {
+                    if (tile.Object == null)
+                    {
+                        continue;
+                    }
+
+                    tile.Object.transform.localScale = Vector3.one * scale;
+                    var renderer = tile.Object.GetComponent<MeshRenderer>();
+                    if (renderer != null)
+                    {
+                        renderer.material.color = Color.Lerp(GetTileDisplayColor(tile), Color.white, flash * 0.75f);
+                    }
+                }
+
+                yield return null;
+            }
+
+            foreach (var tile in clearedTiles)
+            {
+                if (tile.Object != null)
+                {
+                    Destroy(tile.Object);
+                }
             }
         }
 
@@ -1045,8 +1110,16 @@ namespace MatchRogue
                 : new Color(0.92f, 0.88f, 0.72f);
         }
 
-        private void ApplyGravity()
+        private Color GetTileDisplayColor(Tile tile)
         {
+            return tile.Special == SpecialKind.None
+                ? tileColors[tile.Type]
+                : new Color(0.92f, 0.88f, 0.72f);
+        }
+
+        private List<TileMove> ApplyGravity()
+        {
+            var moves = new List<TileMove>();
             for (var x = 0; x < Width; x++)
             {
                 var writeY = 0;
@@ -1059,28 +1132,82 @@ namespace MatchRogue
 
                     if (writeY != y)
                     {
+                        var tile = board[x, y];
                         board[x, writeY] = board[x, y];
                         board[x, y] = null;
-                        board[x, writeY].Object.transform.position = GridToWorld(x, writeY);
+                        moves.Add(new TileMove(tile, GridToWorld(x, y), GridToWorld(x, writeY), Mathf.Abs(y - writeY)));
                     }
 
                     writeY++;
                 }
             }
+
+            return moves;
         }
 
-        private void RefillBoard()
+        private List<TileMove> RefillBoard()
         {
+            var moves = new List<TileMove>();
             for (var x = 0; x < Width; x++)
             {
+                var spawnIndex = 0;
                 for (var y = 0; y < Height; y++)
                 {
                     if (board[x, y] == null)
                     {
                         board[x, y] = CreateTile(x, y, rng.Next(TileTypes));
+                        var target = GridToWorld(x, y);
+                        var start = GridToWorld(x, Height + spawnIndex);
+                        board[x, y].Object.transform.position = start;
+                        moves.Add(new TileMove(board[x, y], start, target, Height + spawnIndex - y));
+                        spawnIndex++;
                     }
                 }
             }
+
+            return moves;
+        }
+
+        private IEnumerator AnimateFalls(List<TileMove> moves)
+        {
+            if (moves.Count == 0)
+            {
+                yield break;
+            }
+
+            var duration = Mathf.Min(MaxFallAnimSeconds, Mathf.Max(0.12f, moves.Max(move => move.Distance) * FallAnimSecondsPerCell));
+            for (var elapsed = 0f; elapsed < duration; elapsed += Time.deltaTime)
+            {
+                var t = EaseOutCubic(Mathf.Clamp01(elapsed / duration));
+                foreach (var move in moves)
+                {
+                    if (move.Tile.Object != null)
+                    {
+                        move.Tile.Object.transform.position = Vector3.LerpUnclamped(move.From, move.To, t);
+                    }
+                }
+
+                yield return null;
+            }
+
+            foreach (var move in moves)
+            {
+                if (move.Tile.Object != null)
+                {
+                    move.Tile.Object.transform.position = move.To;
+                    move.Tile.Object.transform.localScale = Vector3.one * tileScale;
+                }
+            }
+        }
+
+        private float EaseOutCubic(float t)
+        {
+            return 1f - Mathf.Pow(1f - t, 3f);
+        }
+
+        private float EaseInBack(float t)
+        {
+            return Mathf.Clamp01(t * t * (2.7f * t - 1.7f));
         }
 
         private void CompleteRoom()
@@ -1351,6 +1478,22 @@ namespace MatchRogue
 
             public Vector2Int Position { get; }
             public SpecialKind Special { get; }
+        }
+
+        private struct TileMove
+        {
+            public TileMove(Tile tile, Vector3 from, Vector3 to, int distance)
+            {
+                Tile = tile;
+                From = from;
+                To = to;
+                Distance = distance;
+            }
+
+            public Tile Tile { get; }
+            public Vector3 From { get; }
+            public Vector3 To { get; }
+            public int Distance { get; }
         }
 
         private struct RogueUpgrade
