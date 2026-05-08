@@ -601,7 +601,13 @@ namespace MatchRogue
             var specialPos = first.Special != SpecialKind.None ? a : b;
             var normalPos = first.Special != SpecialKind.None ? b : a;
             var clearSet = new HashSet<Vector2Int> { specialPos };
-            var specialToKeep = new PendingSpecial(normalPos, board[specialPos.x, specialPos.y].Special);
+            var matches = FindMatchGroups();
+            foreach (var matchPos in matches.SelectMany(group => group.Positions))
+            {
+                clearSet.Add(matchPos);
+            }
+
+            var specialToCreate = DetermineSpecialKind(matches, GetPreferredSpecialSpawn(a, b, matches));
             if (board[specialPos.x, specialPos.y].Special == SpecialKind.Rainbow)
             {
                 AddTilesOfType(board[normalPos.x, normalPos.y].Type, clearSet);
@@ -609,7 +615,7 @@ namespace MatchRogue
             }
 
             AwardScoreForClears(clearSet.Count);
-            ResolveClearSet(clearSet, specialToKeep);
+            ResolveClearSet(clearSet, specialToCreate);
             return true;
         }
 
