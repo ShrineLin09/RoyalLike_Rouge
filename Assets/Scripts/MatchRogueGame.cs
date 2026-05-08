@@ -42,6 +42,7 @@ namespace MatchRogue
 
         private Camera mainCamera;
         private Transform boardRoot;
+        private Transform backgroundQuad;
         private Canvas canvas;
         private Text statusText;
         private Text upgradeText;
@@ -55,6 +56,7 @@ namespace MatchRogue
         private Texture2D bombIcon;
         private Texture2D rainbowIcon;
         private Texture2D propellerIcon;
+        private Texture2D backgroundTexture;
         private Coroutine triggerTextRoutine;
 
         private Vector2Int? selected;
@@ -128,6 +130,7 @@ namespace MatchRogue
             mainCamera.backgroundColor = new Color(0.10f, 0.09f, 0.13f);
 
             LoadSpecialIcons();
+            LoadBackgroundTexture();
             boardRoot = new GameObject("Board").transform;
             ConfigureCameraAndBoardLayout();
             BuildBackground();
@@ -141,6 +144,11 @@ namespace MatchRogue
             bombIcon = Resources.Load<Texture2D>("SpecialIcons/Bomb");
             rainbowIcon = Resources.Load<Texture2D>("SpecialIcons/Rainbow");
             propellerIcon = Resources.Load<Texture2D>("SpecialIcons/Propeller");
+        }
+
+        private void LoadBackgroundTexture()
+        {
+            backgroundTexture = Resources.Load<Texture2D>("Backgrounds/SciFiSpace");
         }
 
         private void ConfigureCameraAndBoardLayout()
@@ -160,10 +168,29 @@ namespace MatchRogue
 
             var boardCenter = new Vector3(0f, -0.35f, 0f);
             boardOrigin = boardCenter - new Vector3((Width - 1) * tileSpacing * 0.5f, (Height - 1) * tileSpacing * 0.5f, 0f);
+            RefreshBackgroundTransform();
         }
 
         private void BuildBackground()
         {
+            if (backgroundTexture != null)
+            {
+                var background = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                background.name = "Sci-Fi Space Background";
+                backgroundQuad = background.transform;
+                var collider = background.GetComponent<Collider>();
+                if (collider != null)
+                {
+                    Destroy(collider);
+                }
+
+                var renderer = background.GetComponent<MeshRenderer>();
+                renderer.material = new Material(Shader.Find("Sprites/Default"));
+                renderer.material.mainTexture = backgroundTexture;
+                renderer.material.color = Color.white;
+                RefreshBackgroundTransform();
+            }
+
             for (var x = 0; x < Width; x++)
             {
                 for (var y = 0; y < Height; y++)
@@ -180,6 +207,19 @@ namespace MatchRogue
                         : new Color(0.14f, 0.13f, 0.18f);
                 }
             }
+        }
+
+        private void RefreshBackgroundTransform()
+        {
+            if (backgroundQuad == null || mainCamera == null)
+            {
+                return;
+            }
+
+            var height = mainCamera.orthographicSize * 2f;
+            var width = height * Mathf.Max(0.1f, lastScreenWidth / (float)Mathf.Max(1, lastScreenHeight));
+            backgroundQuad.position = new Vector3(0f, 0f, 1.5f);
+            backgroundQuad.localScale = new Vector3(width, height, 1f);
         }
 
         private void BuildUi()
