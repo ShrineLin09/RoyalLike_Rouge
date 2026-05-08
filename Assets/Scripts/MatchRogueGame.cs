@@ -665,7 +665,10 @@ namespace MatchRogue
 
             if (firstSpecial == SpecialKind.Propeller || secondSpecial == SpecialKind.Propeller)
             {
-                ResolvePropellerCombination(a, b, firstSpecial == SpecialKind.Propeller ? secondSpecial : firstSpecial, clearSet);
+                var propellerPos = secondSpecial == SpecialKind.Propeller ? b : a;
+                var partnerPos = propellerPos == a ? b : a;
+                var partnerSpecial = propellerPos == a ? secondSpecial : firstSpecial;
+                ResolvePropellerCombination(propellerPos, partnerPos, partnerSpecial, clearSet);
                 return;
             }
 
@@ -699,13 +702,14 @@ namespace MatchRogue
             ResolveClearSet(clearSet, null);
         }
 
-        private void ResolvePropellerCombination(Vector2Int a, Vector2Int b, SpecialKind partnerSpecial, HashSet<Vector2Int> clearSet)
+        private void ResolvePropellerCombination(Vector2Int propellerPos, Vector2Int partnerPos, SpecialKind partnerSpecial, HashSet<Vector2Int> clearSet)
         {
-            var reservedTargets = new HashSet<Vector2Int> { a, b };
+            var reservedTargets = new HashSet<Vector2Int> { propellerPos, partnerPos };
             var mode = GetPropellerTargetMode(partnerSpecial);
             var target = GetSmartPropellerTarget(mode, reservedTargets);
             reservedTargets.Add(target);
-            AddCross(a, clearSet);
+            AddCross(propellerPos, clearSet);
+
             if (partnerSpecial == SpecialKind.Bomb)
             {
                 AddBombClear(target, clearSet);
@@ -736,7 +740,7 @@ namespace MatchRogue
             }
 
             AwardScoreForClears(clearSet.Count);
-            ResolveClearSet(clearSet, null);
+            ResolveClearSet(clearSet, null, false);
         }
 
         private void ResolveRainbowSpecialCombination(SpecialKind targetSpecial, HashSet<Vector2Int> clearSet)
