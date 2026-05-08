@@ -1318,9 +1318,12 @@ namespace MatchRogue
                 yield break;
             }
 
-            var original = tile.Object.transform.localScale;
-            tile.Object.transform.localScale = original * 1.2f;
+            tile.Object.transform.localScale = Vector3.one * (tileScale * 1.2f);
             yield return new WaitForSeconds(0.05f);
+            if (tile.Object != null)
+            {
+                tile.Object.transform.localScale = Vector3.one * tileScale;
+            }
         }
 
         private void AddNeighbors(Vector2Int center, HashSet<Vector2Int> output)
