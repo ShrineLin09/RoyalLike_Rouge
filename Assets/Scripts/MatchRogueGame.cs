@@ -379,6 +379,7 @@ namespace MatchRogue
             GenerateBoard();
             PlaceRoomCrates();
             SeedShowcaseSpecialsForRoom();
+            EnsurePlayableBoard();
             RefreshBoardTransforms();
             score = 0;
             comboChain = 0;
@@ -1276,6 +1277,151 @@ namespace MatchRogue
             }
         }
 
+        private IEnumerator EnsurePlayableBoardRoutine()
+        {
+            if (HasAvailableMove())
+            {
+                yield break;
+            }
+
+            ShowTriggerText("棋盘重排！", Color.white);
+            var moves = ShuffleColorTiles();
+            if (moves.Count > 0)
+            {
+                yield return AnimateFalls(moves);
+                yield return new WaitForSeconds(CascadePauseSeconds);
+            }
+        }
+
+        private void EnsurePlayableBoard()
+        {
+            for (var attempts = 0; attempts < 8 && !HasAvailableMove(); attempts++)
+            {
+                ShuffleColorTiles();
+            }
+        }
+
+        private bool HasAvailableMove()
+        {
+            for (var x = 0; x < Width; x++)
+            {
+                for (var y = 0; y < Height; y++)
+                {
+                    var pos = new Vector2Int(x, y);
+                    if (!IsSelectableTile(pos))
+                    {
+                        continue;
+                    }
+
+                    var right = new Vector2Int(x + 1, y);
+                    if (IsSelectableTile(right) && WouldSwapCreateMatch(pos, right))
+                    {
+                        return true;
+                    }
+
+                    var up = new Vector2Int(x, y + 1);
+                    if (IsSelectableTile(up) && WouldSwapCreateMatch(pos, up))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private bool WouldSwapCreateMatch(Vector2Int a, Vector2Int b)
+        {
+            SwapBoardReferences(a, b);
+            var createsMatch = IsPartOfMatch(a) || IsPartOfMatch(b);
+            SwapBoardReferences(a, b);
+            return createsMatch;
+        }
+
+        private void SwapBoardReferences(Vector2Int a, Vector2Int b)
+        {
+            (board[a.x, a.y], board[b.x, b.y]) = (board[b.x, b.y], board[a.x, a.y]);
+        }
+
+        private bool IsPartOfMatch(Vector2Int pos)
+        {
+            return CountLineMatch(pos, Vector2Int.left, Vector2Int.right) >= 3 ||
+                   CountLineMatch(pos, Vector2Int.down, Vector2Int.up) >= 3;
+        }
+
+        private int CountLineMatch(Vector2Int origin, Vector2Int negativeDirection, Vector2Int positiveDirection)
+        {
+            if (!IsInside(origin) || !IsColorTile(board[origin.x, origin.y]))
+            {
+                return 0;
+            }
+
+            return 1 + CountSameColorInDirection(origin, negativeDirection) + CountSameColorInDirection(origin, positiveDirection);
+        }
+
+        private int CountSameColorInDirection(Vector2Int origin, Vector2Int direction)
+        {
+            var count = 0;
+            var current = origin + direction;
+            while (IsInside(current) && HasSameMatchColor(board[origin.x, origin.y], board[current.x, current.y]))
+            {
+                count++;
+                current += direction;
+            }
+
+            return count;
+        }
+
+        private List<TileMove> ShuffleColorTiles()
+        {
+            var positions = new List<Vector2Int>();
+            var tiles = new List<Tile>();
+            for (var x = 0; x < Width; x++)
+            {
+                for (var y = 0; y < Height; y++)
+                {
+                    if (IsColorTile(board[x, y]))
+                    {
+                        positions.Add(new Vector2Int(x, y));
+                        tiles.Add(board[x, y]);
+                    }
+                }
+            }
+
+            if (positions.Count <= 1)
+            {
+                return new List<TileMove>();
+            }
+
+            var originalPositions = tiles.ToDictionary(tile => tile, tile => tile.Object.transform.position);
+            for (var attempts = 0; attempts < 20; attempts++)
+            {
+                var shuffledTiles = tiles.OrderBy(_ => rng.Next()).ToList();
+                for (var i = 0; i < positions.Count; i++)
+                {
+                    var pos = positions[i];
+                    board[pos.x, pos.y] = shuffledTiles[i];
+                }
+
+                if (HasAvailableMove() || attempts == 19)
+                {
+                    var moves = new List<TileMove>();
+                    foreach (var pos in positions)
+                    {
+                        var tile = board[pos.x, pos.y];
+                        var to = GridToWorld(pos.x, pos.y);
+                        var from = originalPositions[tile];
+                        tile.Object.transform.position = from;
+                        moves.Add(new TileMove(tile, from, to, Mathf.Max(1, Mathf.RoundToInt(Vector3.Distance(from, to)))));
+                    }
+
+                    return moves;
+                }
+            }
+
+            return new List<TileMove>();
+        }
+
         private void ResolveMatches(List<MatchGroup> matchGroups, Vector2Int? specialSpawn)
         {
             inputLocked = true;
@@ -1341,6 +1487,7 @@ namespace MatchRogue
                 fallMoves.AddRange(spawnMoves);
                 yield return AnimateFalls(fallMoves);
                 yield return new WaitForSeconds(CascadePauseSeconds);
+                yield return EnsurePlayableBoardRoutine();
 
                 var cascades = FindMatchGroups();
                 if (cascades.Count == 0)
@@ -1389,9 +1536,9 @@ namespace MatchRogue
             {
                 var t = Mathf.Clamp01(elapsed / ClearAnimSeconds);
                 var scale = Mathf.Lerp(tileScale * 1.12f, 0.08f, EaseInBack(t));
-                var flash = Mathf.Sin(t * Mathf.PI);
-                foreach (var tile in clearedTiles)
-                {
+            var flash = Mathf.Sin(t * Mathf.PI);
+            foreach (var tile in clearedTiles)
+            {
                     if (tile.Object == null)
                     {
                         continue;
@@ -1517,6 +1664,16 @@ namespace MatchRogue
             {
                 tile.Object.transform.localScale = Vector3.one * tileScale;
             }
+        }
+
+        private void ShowTriggerText(string message, Color color)
+        {
+            if (triggerTextRoutine != null)
+            {
+                StopCoroutine(triggerTextRoutine);
+            }
+
+            triggerTextRoutine = StartCoroutine(ShowTriggerTextRoutine(message, color));
         }
 
         private void AddNeighbors(Vector2Int center, HashSet<Vector2Int> output)
@@ -2743,12 +2900,7 @@ namespace MatchRogue
                 return;
             }
 
-            if (triggerTextRoutine != null)
-            {
-                StopCoroutine(triggerTextRoutine);
-            }
-
-            triggerTextRoutine = StartCoroutine(ShowTriggerTextRoutine($"{upgrade.Name}触发！", GetFactionColor(upgrade.Faction)));
+            ShowTriggerText($"{upgrade.Name}触发！", GetFactionColor(upgrade.Faction));
         }
 
         private IEnumerator ShowTriggerTextRoutine(string message, Color color)
