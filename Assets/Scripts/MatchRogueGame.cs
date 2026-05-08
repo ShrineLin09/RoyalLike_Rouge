@@ -386,7 +386,7 @@ namespace MatchRogue
             mark.name = name;
             mark.transform.SetParent(tile.Object.transform);
             mark.transform.localPosition = new Vector3(0f, 0f, -0.06f);
-            mark.transform.localScale = new Vector3(0.72f, 0.72f, 1f);
+            mark.transform.localScale = new Vector3(0.54f, 0.54f, 1f);
             var collider = mark.GetComponent<Collider>();
             if (collider != null)
             {
@@ -900,8 +900,7 @@ namespace MatchRogue
                 var runStart = 0;
                 for (var x = 1; x <= Width; x++)
                 {
-                    var same = x < Width && board[x, y] != null && board[runStart, y] != null &&
-                               board[x, y].Type == board[runStart, y].Type;
+                    var same = x < Width && HasSameMatchColor(board[x, y], board[runStart, y]);
                     if (same)
                     {
                         continue;
@@ -928,8 +927,7 @@ namespace MatchRogue
                 var runStart = 0;
                 for (var y = 1; y <= Height; y++)
                 {
-                    var same = y < Height && board[x, y] != null && board[x, runStart] != null &&
-                               board[x, y].Type == board[x, runStart].Type;
+                    var same = y < Height && HasSameMatchColor(board[x, y], board[x, runStart]);
                     if (same)
                     {
                         continue;
@@ -1013,8 +1011,8 @@ namespace MatchRogue
             if (strongestGroup.Positions.Count == 4)
             {
                 var specialKind = strongestGroup.Orientation == MatchOrientation.Horizontal
-                    ? SpecialKind.LineHorizontal
-                    : SpecialKind.LineVertical;
+                    ? SpecialKind.LineVertical
+                    : SpecialKind.LineHorizontal;
                 return new PendingSpecial(position, specialKind);
             }
 
@@ -1286,6 +1284,11 @@ namespace MatchRogue
         private bool IsSpecialTile(Vector2Int pos)
         {
             return IsInside(pos) && board[pos.x, pos.y] != null && board[pos.x, pos.y].Special != SpecialKind.None;
+        }
+
+        private bool HasSameMatchColor(Tile first, Tile second)
+        {
+            return first != null && second != null && first.Type == second.Type;
         }
 
         private bool IsRocket(SpecialKind special)
