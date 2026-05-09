@@ -2292,24 +2292,26 @@ namespace MatchRogue
         private void ExpandSpecialClears(HashSet<Vector2Int> baseClears, HashSet<Vector2Int> output)
         {
             var expandedSpecials = new HashSet<Vector2Int>();
-            var queue = baseClears.Where(IsSpecialTile).ToList();
-            var index = 0;
-
-            while (index < queue.Count)
+            var queuedSpecials = new HashSet<Vector2Int>();
+            var queue = new Queue<Vector2Int>();
+            foreach (var pos in baseClears)
             {
-                var pos = queue[index++];
+                QueueSpecialExpansion(pos, expandedSpecials, queuedSpecials, queue);
+            }
+
+            while (queue.Count > 0)
+            {
+                var pos = queue.Dequeue();
                 if (!IsInside(pos) || board[pos.x, pos.y] == null)
                 {
                     continue;
                 }
 
-                if (expandedSpecials.Contains(pos))
+                if (!expandedSpecials.Add(pos))
                 {
                     continue;
                 }
 
-                expandedSpecials.Add(pos);
-                var before = output.Count;
                 var tile = board[pos.x, pos.y];
                 switch (tile.Special)
                 {
@@ -2331,11 +2333,22 @@ namespace MatchRogue
                         break;
                 }
 
-                if (output.Count != before)
+                foreach (var next in output.ToArray())
                 {
-                    queue = output.Where(IsSpecialTile).ToList();
+                    QueueSpecialExpansion(next, expandedSpecials, queuedSpecials, queue);
                 }
             }
+        }
+
+        private void QueueSpecialExpansion(Vector2Int pos, HashSet<Vector2Int> expandedSpecials, HashSet<Vector2Int> queuedSpecials, Queue<Vector2Int> queue)
+        {
+            if (expandedSpecials.Contains(pos) || queuedSpecials.Contains(pos) || !IsSpecialTile(pos))
+            {
+                return;
+            }
+
+            queuedSpecials.Add(pos);
+            queue.Enqueue(pos);
         }
 
         private void AddRocketClear(Vector2Int pos, MatchOrientation orientation, HashSet<Vector2Int> output)
@@ -2448,7 +2461,7 @@ namespace MatchRogue
         private void AddPropellerClear(Vector2Int pos, HashSet<Vector2Int> output)
         {
             propellerActivationCount++;
-            var reservedTargets = new HashSet<Vector2Int> { pos };
+            var reservedTargets = new HashSet<Vector2Int>(output) { pos };
             var target = GetSmartPropellerTarget(PropellerTargetMode.Single, reservedTargets);
             reservedTargets.Add(target);
             AddCross(pos, output);
