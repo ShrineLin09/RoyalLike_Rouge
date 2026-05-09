@@ -21,6 +21,8 @@ namespace MatchRogue
         private const float FallAnimSecondsPerCell = 0.055f;
         private const float MaxFallAnimSeconds = 0.26f;
         private const float CascadePauseSeconds = 0.08f;
+        private const float HintDelaySeconds = 3f;
+        private const float StrongHintDelaySeconds = 6f;
         private const int RoomsPerRun = 4;
 
         private static readonly int[] RoomMoveLimits = { 30, 28, 26, 24 };
@@ -89,9 +91,13 @@ namespace MatchRogue
         private float tileSpacing = 1f;
         private float tileScale = 0.82f;
         private Vector3 boardOrigin;
+        private GameObject hintArrow;
+        private Vector2Int? hintFrom;
+        private Vector2Int? hintTo;
         private int lastScreenWidth;
         private int lastScreenHeight;
         private float lastClickTime;
+        private float lastEffectiveActionTime;
 
         private void Awake()
         {
@@ -109,14 +115,18 @@ namespace MatchRogue
 
             if (inputLocked)
             {
+                CancelHint();
+                lastEffectiveActionTime = Time.unscaledTime;
                 return;
             }
 
             if (TryGetPrimaryPressPosition(out var screenPosition))
             {
+                MarkEffectiveAction();
                 TrySelectTile(screenPosition);
             }
 
+            UpdateIdleHint();
             RefreshStatus();
         }
 
@@ -366,6 +376,7 @@ namespace MatchRogue
             pendingRainbowCopySpawns = 0;
             pendingBridgeBombSpawns = 0;
             pendingBridgeRocketSpawns = 0;
+            MarkEffectiveAction();
             restartButton.GetComponentInChildren<Text>().text = "重新开始";
             restartButton.gameObject.SetActive(true);
             endlessButton.gameObject.SetActive(false);
@@ -389,6 +400,7 @@ namespace MatchRogue
             baseTargetScore = RoomTargetScores[roomIndex];
             targetScore = GetAdjustedTargetScore();
             SetUpgradePanel(false);
+            MarkEffectiveAction();
             RefreshStatus();
         }
 
@@ -728,6 +740,7 @@ namespace MatchRogue
 
         private void ClearTiles()
         {
+            CancelHint();
             for (var x = 0; x < Width; x++)
             {
                 for (var y = 0; y < Height; y++)
@@ -840,8 +853,15 @@ namespace MatchRogue
             selected = null;
         }
 
+        private void MarkEffectiveAction()
+        {
+            lastEffectiveActionTime = Time.unscaledTime;
+            CancelHint();
+        }
+
         private void TrySwap(Vector2Int a, Vector2Int b)
         {
+            MarkEffectiveAction();
             SwapTiles(a, b);
             if (TryResolveSpecialSwap(a, b))
             {
@@ -1301,6 +1321,191 @@ namespace MatchRogue
             }
         }
 
+        private HintMove? FindBestHintMove()
+        {
+            HintMove? best = null;
+            for (var x = 0; x < Width; x++)
+            {
+                for (var y = 0; y < Height; y++)
+                {
+                    var pos = new Vector2Int(x, y);
+                    if (!IsSelectableTile(pos))
+                    {
+                        continue;
+                    }
+
+                    TryScoreHintMove(pos, new Vector2Int(x + 1, y), ref best);
+                    TryScoreHintMove(pos, new Vector2Int(x, y + 1), ref best);
+                }
+            }
+
+            return best;
+        }
+
+        private void TryScoreHintMove(Vector2Int a, Vector2Int b, ref HintMove? best)
+        {
+            if (!IsSelectableTile(b))
+            {
+                return;
+            }
+
+            var score = ScoreHintMove(a, b);
+            if (score <= 0f)
+            {
+                return;
+            }
+
+            if (!best.HasValue || score > best.Value.Score)
+            {
+                best = new HintMove(a, b, score);
+            }
+        }
+
+        private float ScoreHintMove(Vector2Int a, Vector2Int b)
+        {
+            var first = board[a.x, a.y];
+            var second = board[b.x, b.y];
+            if (first == null || second == null)
+            {
+                return 0f;
+            }
+
+            if (first.Special != SpecialKind.None || second.Special != SpecialKind.None)
+            {
+                return ScoreSpecialHintMove(a, b, first.Special, second.Special);
+            }
+
+            SwapBoardReferences(a, b);
+            var matches = FindMatchGroups();
+            var matchedPositions = new HashSet<Vector2Int>(matches.SelectMany(group => group.Positions));
+            var special = DetermineSpecialKind(matches, GetPreferredSpecialSpawn(a, b, matches));
+            SwapBoardReferences(a, b);
+
+            if (matches.Count == 0)
+            {
+                return 0f;
+            }
+
+            var crateHits = CountCratesAffectedByMatches(matchedPositions);
+            var score = 10f + matchedPositions.Count;
+            if (crateHits > 0)
+            {
+                score += 1000f + crateHits * 120f;
+            }
+
+            if (special.HasValue)
+            {
+                score += GetSpecialHintValue(special.Value.Special);
+                score += GetBuildHintBonus(special.Value.Special);
+                score += CountCratesAffectedBySpecialPreview(special.Value.Position, special.Value.Special) * 50f;
+            }
+
+            return score;
+        }
+
+        private float ScoreSpecialHintMove(Vector2Int a, Vector2Int b, SpecialKind firstSpecial, SpecialKind secondSpecial)
+        {
+            var score = 700f;
+            if (firstSpecial != SpecialKind.None && secondSpecial != SpecialKind.None)
+            {
+                score += 500f;
+            }
+
+            score += GetSpecialHintValue(firstSpecial) + GetSpecialHintValue(secondSpecial);
+            score += GetBuildHintBonus(firstSpecial) + GetBuildHintBonus(secondSpecial);
+            score += CountCratesAffectedBySpecialPreview(a, firstSpecial) * 140f;
+            score += CountCratesAffectedBySpecialPreview(b, secondSpecial) * 140f;
+            return score;
+        }
+
+        private int CountCratesAffectedByMatches(HashSet<Vector2Int> matchedPositions)
+        {
+            var crateHits = new HashSet<Vector2Int>();
+            foreach (var pos in matchedPositions)
+            {
+                AddAdjacentCrates(pos, crateHits);
+            }
+
+            return crateHits.Count;
+        }
+
+        private int CountCratesAffectedBySpecialPreview(Vector2Int pos, SpecialKind special)
+        {
+            if (special == SpecialKind.None)
+            {
+                return 0;
+            }
+
+            var affected = new HashSet<Vector2Int> { pos };
+            if (special == SpecialKind.Bomb)
+            {
+                AddRadius(pos, 1, affected);
+            }
+            else if (special == SpecialKind.LineHorizontal)
+            {
+                AddRow(pos.y, affected);
+            }
+            else if (special == SpecialKind.LineVertical)
+            {
+                AddColumn(pos.x, affected);
+            }
+            else if (special == SpecialKind.Rainbow)
+            {
+                AddTilesOfType(GetMostCommonTileType(), affected);
+            }
+            else if (special == SpecialKind.Propeller)
+            {
+                var target = GetSmartPropellerTarget(PropellerTargetMode.Single, new HashSet<Vector2Int> { pos });
+                affected.Add(target);
+                AddCross(pos, affected);
+            }
+
+            return affected.Count(hit => IsInside(hit) && board[hit.x, hit.y] != null && board[hit.x, hit.y].CrateHealth > 0);
+        }
+
+        private float GetSpecialHintValue(SpecialKind special)
+        {
+            switch (special)
+            {
+                case SpecialKind.Rainbow:
+                    return 360f;
+                case SpecialKind.Bomb:
+                    return 260f;
+                case SpecialKind.LineHorizontal:
+                case SpecialKind.LineVertical:
+                    return 180f;
+                case SpecialKind.Propeller:
+                    return 160f;
+                default:
+                    return 0f;
+            }
+        }
+
+        private float GetBuildHintBonus(SpecialKind special)
+        {
+            if (special == SpecialKind.Bomb && GetFactionInvestment(UpgradeFaction.Explosion) > 0)
+            {
+                return 160f + GetFactionInvestment(UpgradeFaction.Explosion) * 30f;
+            }
+
+            if (IsRocket(special) && GetFactionInvestment(UpgradeFaction.Rocket) > 0)
+            {
+                return 160f + GetFactionInvestment(UpgradeFaction.Rocket) * 30f;
+            }
+
+            if (special == SpecialKind.Rainbow && GetFactionInvestment(UpgradeFaction.Rainbow) > 0)
+            {
+                return 170f + GetFactionInvestment(UpgradeFaction.Rainbow) * 35f;
+            }
+
+            if (special == SpecialKind.Propeller && GetFactionInvestment(UpgradeFaction.Propeller) > 0)
+            {
+                return 130f + GetFactionInvestment(UpgradeFaction.Propeller) * 25f;
+            }
+
+            return 0f;
+        }
+
         private bool HasAvailableMove()
         {
             for (var x = 0; x < Width; x++)
@@ -1422,8 +1627,143 @@ namespace MatchRogue
             return new List<TileMove>();
         }
 
+        private void UpdateIdleHint()
+        {
+            if (upgradePanelOpen || remainingCrates <= 0)
+            {
+                CancelHint();
+                lastEffectiveActionTime = Time.unscaledTime;
+                return;
+            }
+
+            var idleSeconds = Time.unscaledTime - lastEffectiveActionTime;
+            if (idleSeconds < HintDelaySeconds)
+            {
+                CancelHint();
+                return;
+            }
+
+            if (!HasAvailableMove())
+            {
+                CancelHint();
+                StartCoroutine(EnsurePlayableBoardRoutine());
+                lastEffectiveActionTime = Time.unscaledTime;
+                return;
+            }
+
+            if (!hintFrom.HasValue || !hintTo.HasValue)
+            {
+                var hint = FindBestHintMove();
+                if (!hint.HasValue)
+                {
+                    return;
+                }
+
+                hintFrom = hint.Value.From;
+                hintTo = hint.Value.To;
+            }
+
+            AnimateHint(idleSeconds >= StrongHintDelaySeconds);
+        }
+
+        private void AnimateHint(bool strong)
+        {
+            if (!hintFrom.HasValue || !hintTo.HasValue)
+            {
+                return;
+            }
+
+            var pulse = (Mathf.Sin(Time.unscaledTime * (strong ? 9f : 5f)) + 1f) * 0.5f;
+            var scale = tileScale + Mathf.Lerp(strong ? 0.12f : 0.06f, strong ? 0.26f : 0.15f, pulse);
+            ApplyHintScale(hintFrom.Value, scale);
+            ApplyHintScale(hintTo.Value, scale);
+
+            if (strong)
+            {
+                ShowHintArrow();
+            }
+            else if (hintArrow != null)
+            {
+                hintArrow.SetActive(false);
+            }
+        }
+
+        private void ApplyHintScale(Vector2Int pos, float scale)
+        {
+            if (IsInside(pos) && board[pos.x, pos.y] != null)
+            {
+                board[pos.x, pos.y].Object.transform.localScale = Vector3.one * scale;
+            }
+        }
+
+        private void ShowHintArrow()
+        {
+            if (!hintFrom.HasValue || !hintTo.HasValue)
+            {
+                return;
+            }
+
+            if (hintArrow == null)
+            {
+                hintArrow = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                hintArrow.name = "Hint Arrow";
+                var collider = hintArrow.GetComponent<Collider>();
+                if (collider != null)
+                {
+                    Destroy(collider);
+                }
+
+                var renderer = hintArrow.GetComponent<MeshRenderer>();
+                renderer.material = new Material(Shader.Find("Sprites/Default"));
+                renderer.material.color = new Color(1f, 0.92f, 0.28f, 0.88f);
+            }
+
+            var from = GridToWorld(hintFrom.Value.x, hintFrom.Value.y);
+            var to = GridToWorld(hintTo.Value.x, hintTo.Value.y);
+            var middle = (from + to) * 0.5f + new Vector3(0f, 0f, -0.35f);
+            hintArrow.SetActive(true);
+            hintArrow.transform.position = middle;
+            hintArrow.transform.localScale = new Vector3(0.52f, 0.12f, 1f);
+            var delta = to - from;
+            hintArrow.transform.rotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg);
+        }
+
+        private void CancelHint()
+        {
+            if (hintFrom.HasValue)
+            {
+                ResetHintScale(hintFrom.Value);
+            }
+
+            if (hintTo.HasValue)
+            {
+                ResetHintScale(hintTo.Value);
+            }
+
+            hintFrom = null;
+            hintTo = null;
+            if (hintArrow != null)
+            {
+                hintArrow.SetActive(false);
+            }
+        }
+
+        private void ResetHintScale(Vector2Int pos)
+        {
+            if (selected.HasValue && selected.Value == pos)
+            {
+                return;
+            }
+
+            if (IsInside(pos) && board[pos.x, pos.y] != null)
+            {
+                board[pos.x, pos.y].Object.transform.localScale = Vector3.one * tileScale;
+            }
+        }
+
         private void ResolveMatches(List<MatchGroup> matchGroups, Vector2Int? specialSpawn)
         {
+            MarkEffectiveAction();
             inputLocked = true;
             comboChain++;
 
@@ -1504,6 +1844,7 @@ namespace MatchRogue
 
             comboChain = 0;
             inputLocked = false;
+            MarkEffectiveAction();
 
             if (remainingCrates <= 0)
             {
@@ -1668,6 +2009,8 @@ namespace MatchRogue
 
         private void ShowTriggerText(string message, Color color)
         {
+            lastEffectiveActionTime = Time.unscaledTime;
+            CancelHint();
             if (triggerTextRoutine != null)
             {
                 StopCoroutine(triggerTextRoutine);
@@ -3079,6 +3422,20 @@ namespace MatchRogue
             public Vector3 From { get; }
             public Vector3 To { get; }
             public int Distance { get; }
+        }
+
+        private struct HintMove
+        {
+            public HintMove(Vector2Int from, Vector2Int to, float score)
+            {
+                From = from;
+                To = to;
+                Score = score;
+            }
+
+            public Vector2Int From { get; }
+            public Vector2Int To { get; }
+            public float Score { get; }
         }
 
         private struct RogueUpgrade
