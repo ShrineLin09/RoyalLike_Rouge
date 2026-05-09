@@ -13,8 +13,8 @@ namespace MatchRogue
 {
     public sealed class MatchRogueGame : MonoBehaviour
     {
-        private const int Width = 8;
-        private const int Height = 8;
+        [SerializeField] private int boardWidth = 9;
+        [SerializeField] private int boardHeight = 11;
         private const int TileTypes = 6;
         private const float MatchPauseSeconds = 0.07f;
         private const float ClearAnimSeconds = 0.18f;
@@ -25,10 +25,11 @@ namespace MatchRogue
         private const float StrongHintDelaySeconds = 12f;
         private const int RoomsPerRun = 4;
 
-        private static readonly int[] RoomMoveLimits = { 30, 28, 26, 24 };
-        private static readonly int[] RoomTargetScores = { 10500, 16500, 26000, 42000 };
-        private static readonly int[] RoomCrateCounts = { 12, 16, 22, 28 };
-        private static readonly int[] RoomTwoLayerCrateCounts = { 1, 4, 8, 12 };
+        private static readonly int[] RoomMoveLimits = { 34, 32, 30, 34 };
+        private static readonly int[] RoomTargetScores = { 14500, 23000, 36000, 56000 };
+        private static readonly int[] RoomCrateCounts = { 16, 22, 30, 38 };
+        private static readonly int[] RoomTwoLayerCrateCounts = { 2, 7, 13, 20 };
+        private static readonly int[] RoomThreeLayerCrateCounts = { 0, 0, 3, 7 };
 
         private readonly Color[] tileColors =
         {
@@ -40,7 +41,7 @@ namespace MatchRogue
             new Color(1.00f, 0.48f, 0.16f)
         };
 
-        private readonly Tile[,] board = new Tile[Width, Height];
+        private Tile[,] board;
         private readonly List<RogueUpgrade> activeUpgrades = new List<RogueUpgrade>();
         private readonly System.Random rng = new System.Random();
 
@@ -98,9 +99,14 @@ namespace MatchRogue
         private int lastScreenHeight;
         private float lastClickTime;
         private float lastEffectiveActionTime;
+        private int Width => boardWidth;
+        private int Height => boardHeight;
 
         private void Awake()
         {
+            boardWidth = Mathf.Clamp(boardWidth, 6, 12);
+            boardHeight = Mathf.Clamp(boardHeight, 6, 14);
+            board = new Tile[Width, Height];
             BuildScene();
             StartRun();
         }
@@ -173,16 +179,16 @@ namespace MatchRogue
             lastScreenHeight = Mathf.Max(1, Screen.height);
 
             var aspect = lastScreenWidth / (float)lastScreenHeight;
-            tileSpacing = 1f;
-            tileScale = 0.82f;
+            tileSpacing = 0.92f;
+            tileScale = Mathf.Clamp(tileSpacing * 0.82f, 0.62f, 0.82f);
 
             var boardWidth = (Width - 1) * tileSpacing + tileScale;
             var boardHeight = (Height - 1) * tileSpacing + tileScale;
-            var requiredHalfHeightForWidth = boardWidth / (2f * Mathf.Max(0.1f, aspect)) + 0.28f;
-            var requiredHalfHeightForHeight = boardHeight * 0.5f + 1.95f;
-            mainCamera.orthographicSize = Mathf.Max(6.4f, requiredHalfHeightForWidth, requiredHalfHeightForHeight);
+            var requiredHalfHeightForWidth = boardWidth / (2f * Mathf.Max(0.1f, aspect)) + 0.25f;
+            var requiredHalfHeightForHeight = boardHeight * 0.5f + 1.75f;
+            mainCamera.orthographicSize = Mathf.Max(6.2f, requiredHalfHeightForWidth, requiredHalfHeightForHeight);
 
-            var boardCenter = new Vector3(0f, -0.35f, 0f);
+            var boardCenter = new Vector3(0f, -0.75f, 0f);
             boardOrigin = boardCenter - new Vector3((Width - 1) * tileSpacing * 0.5f, (Height - 1) * tileSpacing * 0.5f, 0f);
             RefreshBackgroundTransform();
         }
@@ -430,16 +436,21 @@ namespace MatchRogue
 
             totalCrates = Mathf.Min(RoomCrateCounts[roomIndex], positions.Count);
             remainingCrates = totalCrates;
-            var twoLayerCount = Mathf.Min(RoomTwoLayerCrateCounts[roomIndex], totalCrates);
-            var twoLayerPositions = new HashSet<Vector2Int>(positions
+            var threeLayerCount = Mathf.Min(RoomThreeLayerCrateCounts[roomIndex], totalCrates);
+            var layeredCandidates = positions
                 .Take(totalCrates)
                 .OrderBy(_ => rng.Next())
+                .ToList();
+            var threeLayerPositions = new HashSet<Vector2Int>(layeredCandidates.Take(threeLayerCount));
+            var twoLayerCount = Mathf.Min(RoomTwoLayerCrateCounts[roomIndex], totalCrates - threeLayerCount);
+            var twoLayerPositions = new HashSet<Vector2Int>(layeredCandidates
+                .Skip(threeLayerCount)
                 .Take(twoLayerCount));
 
             for (var i = 0; i < totalCrates; i++)
             {
                 var pos = positions[i];
-                board[pos.x, pos.y].CrateHealth = twoLayerPositions.Contains(pos) ? 2 : 1;
+                board[pos.x, pos.y].CrateHealth = threeLayerPositions.Contains(pos) ? 3 : twoLayerPositions.Contains(pos) ? 2 : 1;
                 DecorateTile(board[pos.x, pos.y]);
             }
         }
@@ -450,13 +461,13 @@ namespace MatchRogue
             switch (roomNumber)
             {
                 case 1:
-                    candidates = new[] { CrateLayoutTemplate.EdgeRing, CrateLayoutTemplate.Islands };
+                    candidates = new[] { CrateLayoutTemplate.OpenTopBottomTargets, CrateLayoutTemplate.OpenCenterEdgeTargets };
                     break;
                 case 2:
-                    candidates = new[] { CrateLayoutTemplate.CenterBlock, CrateLayoutTemplate.Channel };
+                    candidates = new[] { CrateLayoutTemplate.SideTargetsMiddleLane, CrateLayoutTemplate.Channel };
                     break;
                 case 3:
-                    candidates = new[] { CrateLayoutTemplate.Islands, CrateLayoutTemplate.CenterBlock, CrateLayoutTemplate.DenseCluster };
+                    candidates = new[] { CrateLayoutTemplate.OpenCenterEdgeTargets, CrateLayoutTemplate.SideTargetsMiddleLane, CrateLayoutTemplate.DenseCluster };
                     break;
                 default:
                     candidates = new[] { CrateLayoutTemplate.DenseCluster, CrateLayoutTemplate.Channel, CrateLayoutTemplate.Mixed };
@@ -471,60 +482,92 @@ namespace MatchRogue
             var positions = new List<Vector2Int>();
             switch (template)
             {
-                case CrateLayoutTemplate.EdgeRing:
+                case CrateLayoutTemplate.OpenTopBottomTargets:
                     for (var x = 0; x < Width; x++)
                     {
                         positions.Add(new Vector2Int(x, 0));
-                        positions.Add(new Vector2Int(x, Height - 1));
+                        if (x % 2 == 0)
+                        {
+                            positions.Add(new Vector2Int(x, 1));
+                        }
+                    }
+
+                    AddRectPositions(positions, 1, 2, Mathf.Max(1, Width - 2), 1);
+                    for (var x = 1; x < Width - 1; x += 2)
+                    {
+                        positions.Add(new Vector2Int(x, 3));
+                    }
+                    break;
+                case CrateLayoutTemplate.OpenCenterEdgeTargets:
+                    for (var x = 0; x < Width; x++)
+                    {
+                        positions.Add(new Vector2Int(x, 0));
+                        if (x % 2 == 0)
+                        {
+                            positions.Add(new Vector2Int(x, Height - 1));
+                        }
                     }
 
                     for (var y = 1; y < Height - 1; y++)
                     {
+                        if (y >= Height / 2 - 2 && y <= Height / 2 + 2)
+                        {
+                            continue;
+                        }
+
                         positions.Add(new Vector2Int(0, y));
                         positions.Add(new Vector2Int(Width - 1, y));
                     }
                     break;
-                case CrateLayoutTemplate.CenterBlock:
-                    AddRectPositions(positions, 2, 2, 4, 4);
-                    AddPositions(positions, new Vector2Int(1, 3), new Vector2Int(6, 4), new Vector2Int(3, 1), new Vector2Int(4, 6));
-                    break;
-                case CrateLayoutTemplate.Islands:
-                    AddRectPositions(positions, 1, 1, 2, 2);
-                    AddRectPositions(positions, 5, 1, 2, 2);
-                    AddRectPositions(positions, 1, 5, 2, 2);
-                    AddRectPositions(positions, 5, 5, 2, 2);
-                    AddPositions(positions, new Vector2Int(3, 3), new Vector2Int(4, 4));
+                case CrateLayoutTemplate.SideTargetsMiddleLane:
+                    AddRectPositions(positions, 0, 1, 2, Height - 2);
+                    AddRectPositions(positions, Width - 2, 1, 2, Height - 2);
+                    for (var y = 2; y < Height - 2; y += 3)
+                    {
+                        positions.Add(new Vector2Int(2, y));
+                        positions.Add(new Vector2Int(Width - 3, y));
+                    }
                     break;
                 case CrateLayoutTemplate.Channel:
                     if (rng.Next(2) == 0)
                     {
+                        var lower = Mathf.Max(1, Height / 2 - 1);
                         for (var x = 0; x < Width; x++)
                         {
-                            positions.Add(new Vector2Int(x, 3));
-                            positions.Add(new Vector2Int(x, 4));
+                            if (x == Width / 2)
+                            {
+                                continue;
+                            }
+
+                            positions.Add(new Vector2Int(x, lower));
+                            positions.Add(new Vector2Int(x, lower + 1));
                         }
                     }
                     else
                     {
+                        var left = Mathf.Max(1, Width / 2 - 1);
                         for (var y = 0; y < Height; y++)
                         {
-                            positions.Add(new Vector2Int(3, y));
-                            positions.Add(new Vector2Int(4, y));
+                            if (y == Height / 2 || y == Height / 2 + 1)
+                            {
+                                continue;
+                            }
+
+                            positions.Add(new Vector2Int(left, y));
+                            positions.Add(new Vector2Int(left + 1, y));
                         }
                     }
 
-                    AddPositions(positions, new Vector2Int(1, 1), new Vector2Int(6, 6), new Vector2Int(1, 6), new Vector2Int(6, 1));
+                    AddPositions(positions, new Vector2Int(1, 1), new Vector2Int(Width - 2, Height - 2), new Vector2Int(1, Height - 2), new Vector2Int(Width - 2, 1));
                     break;
                 case CrateLayoutTemplate.DenseCluster:
-                    AddRectPositions(positions, 2, 2, 4, 4);
+                    AddRectPositions(positions, 1, 1, Mathf.Max(3, Width / 2), Mathf.Max(4, Height / 2));
                     AddPositions(positions,
-                        new Vector2Int(1, 2), new Vector2Int(1, 3), new Vector2Int(1, 4), new Vector2Int(1, 5),
-                        new Vector2Int(6, 2), new Vector2Int(6, 3), new Vector2Int(6, 4), new Vector2Int(6, 5),
-                        new Vector2Int(2, 1), new Vector2Int(3, 1), new Vector2Int(4, 1), new Vector2Int(5, 1),
-                        new Vector2Int(2, 6), new Vector2Int(3, 6), new Vector2Int(4, 6), new Vector2Int(5, 6));
+                        new Vector2Int(Width - 2, 1), new Vector2Int(Width - 2, 2), new Vector2Int(Width - 3, 1),
+                        new Vector2Int(1, Height - 2), new Vector2Int(2, Height - 2));
                     break;
                 case CrateLayoutTemplate.Mixed:
-                    positions.AddRange(BuildCrateTemplate(CrateLayoutTemplate.Channel).Take(14));
+                    positions.AddRange(BuildCrateTemplate(CrateLayoutTemplate.Channel).Take(20));
                     positions.AddRange(BuildCrateTemplate(CrateLayoutTemplate.DenseCluster).Take(18));
                     break;
             }
@@ -692,6 +735,11 @@ namespace MatchRogue
             if (tile.CrateHealth > 1)
             {
                 AddTileMark(tile, "CrateLayer", new Color(0.98f, 0.78f, 0.24f), new Vector3(0.18f, 0.18f, 1f), new Vector3(0.22f, 0.22f, 0f));
+            }
+
+            if (tile.CrateHealth > 2)
+            {
+                AddTileMark(tile, "CrateHeavyLayer", new Color(0.74f, 0.82f, 0.92f), new Vector3(0.16f, 0.16f, 1f), new Vector3(-0.22f, 0.22f, 0f));
             }
         }
 
@@ -3525,9 +3573,9 @@ namespace MatchRogue
 
         private enum CrateLayoutTemplate
         {
-            EdgeRing,
-            CenterBlock,
-            Islands,
+            OpenTopBottomTargets,
+            OpenCenterEdgeTargets,
+            SideTargetsMiddleLane,
             Channel,
             DenseCluster,
             Mixed
