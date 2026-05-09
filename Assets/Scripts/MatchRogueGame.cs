@@ -30,6 +30,85 @@ namespace MatchRogue
         private static readonly int[] RoomCrateCounts = { 16, 22, 30, 38 };
         private static readonly int[] RoomTwoLayerCrateCounts = { 2, 7, 13, 20 };
         private static readonly int[] RoomThreeLayerCrateCounts = { 0, 0, 3, 7 };
+        private static readonly LevelConfig[] LevelConfigs =
+        {
+            new LevelConfig(
+                1,
+                9,
+                11,
+                34,
+                new[]
+                {
+                    ".........",
+                    ".........",
+                    ".........",
+                    ".........",
+                    ".........",
+                    ".........",
+                    ".........",
+                    "..11111..",
+                    ".1122211.",
+                    "1.......1",
+                    "11.....11"
+                }),
+            new LevelConfig(
+                2,
+                9,
+                11,
+                32,
+                new[]
+                {
+                    ".........",
+                    "1.......1",
+                    "1.......1",
+                    "22.....22",
+                    ".........",
+                    ".1111111.",
+                    ".........",
+                    "22.....22",
+                    "1.......1",
+                    "1.......1",
+                    "........."
+                }),
+            new LevelConfig(
+                3,
+                9,
+                11,
+                30,
+                new[]
+                {
+                    ".........",
+                    "..11111..",
+                    ".1222221.",
+                    "..23332..",
+                    "...222...",
+                    ".........",
+                    "11.....11",
+                    "22.....22",
+                    "11.....11",
+                    ".........",
+                    "........."
+                }),
+            new LevelConfig(
+                4,
+                9,
+                11,
+                34,
+                new[]
+                {
+                    ".........",
+                    ".........",
+                    "111......",
+                    "22211....",
+                    "23322....",
+                    "23332....",
+                    "22222....",
+                    ".........",
+                    "....22222",
+                    "....23332",
+                    "....22222"
+                })
+        };
 
         private readonly Color[] tileColors =
         {
@@ -104,6 +183,13 @@ namespace MatchRogue
 
         private void Awake()
         {
+            var firstLevelConfig = GetLevelConfig(1);
+            if (firstLevelConfig != null)
+            {
+                boardWidth = firstLevelConfig.BoardWidth;
+                boardHeight = firstLevelConfig.BoardHeight;
+            }
+
             boardWidth = Mathf.Clamp(boardWidth, 6, 12);
             boardHeight = Mathf.Clamp(boardHeight, 6, 14);
             board = new Tile[Width, Height];
@@ -401,7 +487,8 @@ namespace MatchRogue
             score = 0;
             comboChain = 0;
             var roomIndex = Mathf.Clamp(room - 1, 0, RoomsPerRun - 1);
-            roomMoveLimit = RoomMoveLimits[roomIndex];
+            var levelConfig = GetLevelConfig(room);
+            roomMoveLimit = levelConfig?.MoveLimit ?? RoomMoveLimits[roomIndex];
             movesRemaining = roomMoveLimit;
             baseTargetScore = RoomTargetScores[roomIndex];
             targetScore = GetAdjustedTargetScore();
@@ -429,6 +516,12 @@ namespace MatchRogue
         private void PlaceRoomCrates()
         {
             var roomIndex = Mathf.Clamp(room - 1, 0, RoomsPerRun - 1);
+            var levelConfig = GetLevelConfig(room);
+            if (levelConfig != null && TryPlaceConfiguredCrates(levelConfig))
+            {
+                return;
+            }
+
             var template = PickCrateTemplate(room);
             var positions = BuildCrateTemplate(template);
             ApplyCrateTemplateJitter(positions, roomIndex);
@@ -453,6 +546,69 @@ namespace MatchRogue
                 board[pos.x, pos.y].CrateHealth = threeLayerPositions.Contains(pos) ? 3 : twoLayerPositions.Contains(pos) ? 2 : 1;
                 DecorateTile(board[pos.x, pos.y]);
             }
+        }
+
+        private LevelConfig GetLevelConfig(int levelIndex)
+        {
+            return LevelConfigs.FirstOrDefault(level => level.LevelIndex == levelIndex);
+        }
+
+        private bool TryPlaceConfiguredCrates(LevelConfig config)
+        {
+            if (config.BoardWidth != Width || config.BoardHeight != Height)
+            {
+                Debug.LogWarning($"Level {config.LevelIndex} board size is {config.BoardWidth}x{config.BoardHeight}, current board is {Width}x{Height}. Out-of-range boxes will be skipped.");
+            }
+
+            totalCrates = 0;
+            remainingCrates = 0;
+
+            for (var row = 0; row < config.BoxMapRows.Length; row++)
+            {
+                var mapRow = config.BoxMapRows[row] ?? string.Empty;
+                if (mapRow.Length != config.BoardWidth)
+                {
+                    Debug.LogWarning($"Level {config.LevelIndex} row {row} has width {mapRow.Length}, expected {config.BoardWidth}.");
+                }
+
+                // Box maps are authored from top to bottom. Runtime grid coordinates use bottom-left origin:
+                // x increases left to right, y increases bottom to top.
+                var y = Height - 1 - row;
+                for (var x = 0; x < mapRow.Length; x++)
+                {
+                    var hp = mapRow[x] - '0';
+                    if (mapRow[x] == '.')
+                    {
+                        continue;
+                    }
+
+                    if (hp < 1 || hp > 3)
+                    {
+                        Debug.LogWarning($"Level {config.LevelIndex} has invalid box token '{mapRow[x]}' at map row {row}, x {x}. Use '.', '1', '2', or '3'.");
+                        continue;
+                    }
+
+                    var pos = new Vector2Int(x, y);
+                    if (!IsInside(pos))
+                    {
+                        Debug.LogWarning($"Level {config.LevelIndex} box ({x},{y}) is outside the {Width}x{Height} board and was skipped.");
+                        continue;
+                    }
+
+                    board[pos.x, pos.y].CrateHealth = hp;
+                    DecorateTile(board[pos.x, pos.y]);
+                    totalCrates++;
+                }
+            }
+
+            remainingCrates = totalCrates;
+            if (totalCrates <= 0)
+            {
+                Debug.LogWarning($"Level {config.LevelIndex} has no valid boxes. Falling back to template crate placement.");
+                return false;
+            }
+
+            return true;
         }
 
         private CrateLayoutTemplate PickCrateTemplate(int roomNumber)
@@ -3443,6 +3599,24 @@ namespace MatchRogue
             public SpecialKind Special { get; set; }
             public int CrateHealth { get; set; }
             public GameObject Object { get; }
+        }
+
+        private sealed class LevelConfig
+        {
+            public LevelConfig(int levelIndex, int boardWidth, int boardHeight, int moveLimit, string[] boxMapRows)
+            {
+                LevelIndex = levelIndex;
+                BoardWidth = boardWidth;
+                BoardHeight = boardHeight;
+                MoveLimit = moveLimit;
+                BoxMapRows = boxMapRows ?? Array.Empty<string>();
+            }
+
+            public int LevelIndex { get; }
+            public int BoardWidth { get; }
+            public int BoardHeight { get; }
+            public int MoveLimit { get; }
+            public string[] BoxMapRows { get; }
         }
 
         private sealed class MatchGroup
