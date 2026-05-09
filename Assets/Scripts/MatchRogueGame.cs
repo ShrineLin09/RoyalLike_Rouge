@@ -21,8 +21,8 @@ namespace MatchRogue
         private const float FallAnimSecondsPerCell = 0.055f;
         private const float MaxFallAnimSeconds = 0.26f;
         private const float CascadePauseSeconds = 0.08f;
-        private const float HintDelaySeconds = 3f;
-        private const float StrongHintDelaySeconds = 6f;
+        private const float HintDelaySeconds = 7f;
+        private const float StrongHintDelaySeconds = 12f;
         private const int RoomsPerRun = 4;
 
         private static readonly int[] RoomMoveLimits = { 30, 28, 26, 24 };
@@ -1673,8 +1673,8 @@ namespace MatchRogue
                 return;
             }
 
-            var pulse = (Mathf.Sin(Time.unscaledTime * (strong ? 9f : 5f)) + 1f) * 0.5f;
-            var scale = tileScale + Mathf.Lerp(strong ? 0.12f : 0.06f, strong ? 0.26f : 0.15f, pulse);
+            var pulse = (Mathf.Sin(Time.unscaledTime * (strong ? 5.2f : 3.2f)) + 1f) * 0.5f;
+            var scale = tileScale + Mathf.Lerp(strong ? 0.08f : 0.035f, strong ? 0.18f : 0.10f, pulse);
             ApplyHintScale(hintFrom.Value, scale);
             ApplyHintScale(hintTo.Value, scale);
 
