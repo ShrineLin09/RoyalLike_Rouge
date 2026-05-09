@@ -1098,7 +1098,7 @@ namespace MatchRogue
             var clearSet = new HashSet<Vector2Int> { pos };
             if (board[pos.x, pos.y].Special == SpecialKind.Rainbow)
             {
-                AddTilesOfType(GetMostCommonTileType(), clearSet);
+                AddRainbowColorClear(GetMostCommonTileType(), clearSet);
                 ApplyRainbowBonusClears(pos, clearSet);
             }
 
@@ -1150,7 +1150,7 @@ namespace MatchRogue
             var specialToCreate = DetermineSpecialKind(matches, GetPreferredSpecialSpawn(a, b, matches));
             if (board[specialPos.x, specialPos.y].Special == SpecialKind.Rainbow)
             {
-                AddTilesOfType(board[normalPos.x, normalPos.y].Type, clearSet);
+                AddRainbowColorClear(board[normalPos.x, normalPos.y].Type, clearSet);
                 ApplyRainbowBonusClears(specialPos, clearSet);
             }
 
@@ -1205,8 +1205,7 @@ namespace MatchRogue
 
             if (firstSpecial == SpecialKind.Bomb && secondSpecial == SpecialKind.Bomb)
             {
-                AddRadius(a, 2, clearSet);
-                AddRadius(b, 2, clearSet);
+                AddRadius(b, 3, clearSet);
                 AwardScoreForClears(clearSet.Count);
                 ResolveClearSet(clearSet, null, false);
                 return;
@@ -1214,7 +1213,7 @@ namespace MatchRogue
 
             if ((firstIsRocket && secondSpecial == SpecialKind.Bomb) || (secondIsRocket && firstSpecial == SpecialKind.Bomb))
             {
-                AddWideCross(a, clearSet);
+                AddStrongRocketBombClear(b, clearSet);
                 AwardScoreForClears(clearSet.Count);
                 ResolveClearSet(clearSet, null, false);
                 return;
@@ -1268,7 +1267,8 @@ namespace MatchRogue
         private void ResolveRainbowSpecialCombination(SpecialKind targetSpecial, HashSet<Vector2Int> clearSet)
         {
             var targetType = GetMostCommonTileType();
-            var positions = GetTilesOfType(targetType);
+            var maxCount = targetSpecial == SpecialKind.Bomb ? 9 : IsRocket(targetSpecial) ? 14 : int.MaxValue;
+            var positions = GetPrioritizedTilesOfType(targetType, maxCount);
             var specialToApply = IsRocket(targetSpecial)
                 ? (rng.Next(2) == 0 ? SpecialKind.LineHorizontal : SpecialKind.LineVertical)
                 : targetSpecial;
@@ -1282,11 +1282,29 @@ namespace MatchRogue
 
                 board[pos.x, pos.y].Special = specialToApply;
                 DecorateTile(board[pos.x, pos.y]);
-                clearSet.Add(pos);
+                if (targetSpecial == SpecialKind.Bomb)
+                {
+                    AddRadius(pos, 2, clearSet);
+                }
+                else if (IsRocket(targetSpecial))
+                {
+                    if (specialToApply == SpecialKind.LineHorizontal)
+                    {
+                        AddRow(pos.y, clearSet);
+                    }
+                    else
+                    {
+                        AddColumn(pos.x, clearSet);
+                    }
+                }
+                else
+                {
+                    clearSet.Add(pos);
+                }
             }
 
             AwardScoreForClears(clearSet.Count);
-            ResolveClearSet(clearSet, null);
+            ResolveClearSet(clearSet, null, false);
         }
 
         private PropellerTargetMode GetPropellerTargetMode(SpecialKind partnerSpecial)
@@ -1431,7 +1449,8 @@ namespace MatchRogue
 
         private void AddBombClearPreview(Vector2Int target, HashSet<Vector2Int> affected)
         {
-            var radius = 1 + Mathf.Min(2, GetUpgradeLevel(UpgradeKind.BombRadius));
+            var radius = HasUpgrade(UpgradeKind.ExplosionCore) ? 2 : 1;
+            radius += Mathf.Min(2, GetUpgradeLevel(UpgradeKind.BombRadius));
             if (GetUpgradeLevel(UpgradeKind.ExplosionAftershock) > 0)
             {
                 radius += 1;
@@ -1493,9 +1512,59 @@ namespace MatchRogue
             return result;
         }
 
+        private List<Vector2Int> GetPrioritizedTilesOfType(int targetType, int maxCount)
+        {
+            var candidates = GetTilesOfType(targetType)
+                .OrderByDescending(GetAdjacentCratePressure)
+                .ThenBy(_ => rng.Next())
+                .ToList();
+
+            return maxCount == int.MaxValue ? candidates : candidates.Take(maxCount).ToList();
+        }
+
+        private int GetAdjacentCratePressure(Vector2Int pos)
+        {
+            var pressure = 0;
+            var offsets = new[]
+            {
+                new Vector2Int(0, 0),
+                new Vector2Int(1, 0),
+                new Vector2Int(-1, 0),
+                new Vector2Int(0, 1),
+                new Vector2Int(0, -1)
+            };
+
+            foreach (var offset in offsets)
+            {
+                var check = pos + offset;
+                if (IsInside(check) && board[check.x, check.y] != null && board[check.x, check.y].CrateHealth > 0)
+                {
+                    pressure += 1 + board[check.x, check.y].CrateHealth;
+                }
+            }
+
+            return pressure;
+        }
+
         private void AddTilesOfType(int targetType, HashSet<Vector2Int> output)
         {
             foreach (var pos in GetTilesOfType(targetType))
+            {
+                output.Add(pos);
+            }
+        }
+
+        private void AddRainbowColorClear(int targetType, HashSet<Vector2Int> output)
+        {
+            var positions = GetTilesOfType(targetType);
+            var count = HasUpgrade(UpgradeKind.RainbowCore)
+                ? positions.Count
+                : Mathf.CeilToInt(positions.Count * 0.5f);
+
+            foreach (var pos in positions
+                         .OrderByDescending(GetAdjacentCratePressure)
+                         .ThenBy(_ => rng.Next())
+                         .Take(count))
             {
                 output.Add(pos);
             }
@@ -1643,19 +1712,29 @@ namespace MatchRogue
             var affected = new HashSet<Vector2Int> { pos };
             if (special == SpecialKind.Bomb)
             {
-                AddRadius(pos, 1, affected);
+                AddBombClearPreview(pos, affected);
             }
             else if (special == SpecialKind.LineHorizontal)
             {
-                AddRow(pos.y, affected);
+                if (HasUpgrade(UpgradeKind.RocketCore))
+                {
+                    AddRow(pos.y, affected);
+                }
+                else
+                {
+                    AddLineSegment(pos, MatchOrientation.Horizontal, 3, affected);
+                }
             }
             else if (special == SpecialKind.LineVertical)
             {
-                AddColumn(pos.x, affected);
-            }
-            else if (special == SpecialKind.Rainbow)
-            {
-                AddTilesOfType(GetMostCommonTileType(), affected);
+                if (HasUpgrade(UpgradeKind.RocketCore))
+                {
+                    AddColumn(pos.x, affected);
+                }
+                else
+                {
+                    AddLineSegment(pos, MatchOrientation.Vertical, 4, affected);
+                }
             }
             else if (special == SpecialKind.Propeller)
             {
@@ -2300,6 +2379,20 @@ namespace MatchRogue
             }
         }
 
+        private void AddLineSegment(Vector2Int center, MatchOrientation orientation, int reach, HashSet<Vector2Int> output)
+        {
+            for (var offset = -reach; offset <= reach; offset++)
+            {
+                var pos = orientation == MatchOrientation.Horizontal
+                    ? new Vector2Int(center.x + offset, center.y)
+                    : new Vector2Int(center.x, center.y + offset);
+                if (IsInside(pos))
+                {
+                    output.Add(pos);
+                }
+            }
+        }
+
         private void AddWideCross(Vector2Int center, HashSet<Vector2Int> output)
         {
             for (var offset = -1; offset <= 1; offset++)
@@ -2309,6 +2402,13 @@ namespace MatchRogue
                 AddRow(row, output);
                 AddColumn(column, output);
             }
+        }
+
+        private void AddStrongRocketBombClear(Vector2Int center, HashSet<Vector2Int> output)
+        {
+            AddRow(center.y, output);
+            AddColumn(center.x, output);
+            AddRadius(center, 2, output);
         }
 
         private void AddEntireBoard(HashSet<Vector2Int> output)
@@ -2334,32 +2434,10 @@ namespace MatchRogue
 
         private void ApplyDeterministicPostClearSpawns(HashSet<Vector2Int> clearedPositions, int explosionCount)
         {
-            if (GetUpgradeLevel(UpgradeKind.ExplosionCore) > 0 && explosionCount > 0)
-            {
-                bombActivationsSinceCoreReward += explosionCount;
-                while (bombActivationsSinceCoreReward >= 3)
-                {
-                    bombActivationsSinceCoreReward -= 3;
-                    ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.ExplosionCore));
-                    CreateSpecialOnRandomColorTile(SpecialKind.Bomb);
-                }
-            }
-
             if (GetUpgradeLevel(UpgradeKind.BombSpawn) > 0 && explosionCount >= 2)
             {
                 ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.BombSpawn));
                 CreateSpecialOnRandomColorTile(SpecialKind.Bomb);
-            }
-
-            if (GetUpgradeLevel(UpgradeKind.RocketCore) > 0 && clearedPositions.Count > 0)
-            {
-                rocketCoreClearedCount += clearedPositions.Count;
-                while (rocketCoreClearedCount >= 30)
-                {
-                    rocketCoreClearedCount -= 30;
-                    ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.RocketCore));
-                    CreateSpecialOnRandomColorTile(rng.Next(2) == 0 ? SpecialKind.LineHorizontal : SpecialKind.LineVertical);
-                }
             }
 
             for (var i = 0; i < pendingRainbowCopySpawns; i++)
@@ -2453,6 +2531,19 @@ namespace MatchRogue
 
         private void CreateSpecialOnRandomColorTile(SpecialKind special)
         {
+            var candidates = GetSpecialSpawnCandidates(special);
+            if (candidates.Count == 0)
+            {
+                return;
+            }
+
+            var pos = candidates[rng.Next(candidates.Count)];
+            board[pos.x, pos.y].Special = special;
+            DecorateTile(board[pos.x, pos.y]);
+        }
+
+        private List<Vector2Int> GetSpecialSpawnCandidates(SpecialKind special)
+        {
             var candidates = new List<Vector2Int>();
             for (var x = 0; x < Width; x++)
             {
@@ -2465,18 +2556,26 @@ namespace MatchRogue
                 }
             }
 
-            if (candidates.Count == 0)
+            if (special != SpecialKind.Rainbow)
             {
-                return;
+                return candidates;
             }
 
-            var pos = candidates[rng.Next(candidates.Count)];
-            board[pos.x, pos.y].Special = special;
-            DecorateTile(board[pos.x, pos.y]);
+            var center = new Vector2(Width * 0.5f - 0.5f, Height * 0.5f - 0.5f);
+            return candidates
+                .OrderBy(pos => Vector2.Distance(new Vector2(pos.x, pos.y), center))
+                .ThenByDescending(GetAdjacentCratePressure)
+                .ThenBy(_ => rng.Next())
+                .ToList();
         }
 
         private void SeedShowcaseSpecialsForRoom()
         {
+            if (HasUpgrade(UpgradeKind.RainbowCore))
+            {
+                CreateSpecialOnRandomColorTile(SpecialKind.Rainbow);
+            }
+
             if (room == 3)
             {
                 CreateSpecialOnRandomColorTile(rng.Next(2) == 0 ? SpecialKind.LineHorizontal : SpecialKind.LineVertical);
@@ -2529,7 +2628,7 @@ namespace MatchRogue
                         AddBombClear(pos, output);
                         break;
                     case SpecialKind.Rainbow:
-                        AddTilesOfType(GetMostCommonTileType(), output);
+                        AddRainbowColorClear(GetMostCommonTileType(), output);
                         ApplyRainbowBonusClears(pos, output);
                         break;
                     case SpecialKind.Propeller:
@@ -2558,13 +2657,21 @@ namespace MatchRogue
         private void AddRocketClear(Vector2Int pos, MatchOrientation orientation, HashSet<Vector2Int> output)
         {
             rocketActivationCount++;
-            if (orientation == MatchOrientation.Horizontal)
+            if (HasUpgrade(UpgradeKind.RocketCore))
             {
-                AddRow(pos.y, output);
+                if (orientation == MatchOrientation.Horizontal)
+                {
+                    AddRow(pos.y, output);
+                }
+                else
+                {
+                    AddColumn(pos.x, output);
+                }
             }
             else
             {
-                AddColumn(pos.x, output);
+                var reach = orientation == MatchOrientation.Horizontal ? 3 : 4;
+                AddLineSegment(pos, orientation, reach, output);
             }
 
             if (GetUpgradeLevel(UpgradeKind.RocketSplit) > 0)
@@ -2610,7 +2717,8 @@ namespace MatchRogue
         private void AddBombClear(Vector2Int pos, HashSet<Vector2Int> output)
         {
             currentResolutionExplosionCount++;
-            var radius = 1 + Mathf.Min(2, GetUpgradeLevel(UpgradeKind.BombRadius));
+            var radius = HasUpgrade(UpgradeKind.ExplosionCore) ? 2 : 1;
+            radius += Mathf.Min(2, GetUpgradeLevel(UpgradeKind.BombRadius));
             if (GetUpgradeLevel(UpgradeKind.BombRadius) > 0)
             {
                 ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.BombRadius));
