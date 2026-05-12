@@ -3340,19 +3340,19 @@ namespace MatchRogue
         {
             return new[]
             {
-                new RogueUpgrade(UpgradeKind.ExplosionCore, UpgradeFaction.Explosion, UpgradeRarity.Common, "爆破核心", "每触发3次爆炸，生成1个炸弹。", 1, true),
+                new RogueUpgrade(UpgradeKind.ExplosionCore, UpgradeFaction.Explosion, UpgradeRarity.Common, "爆破核心", "单个炸弹从3x3升级为5x5，并解锁爆破树。", 1, true),
                 new RogueUpgrade(UpgradeKind.BombRadius, UpgradeFaction.Explosion, UpgradeRarity.Common, "炸弹扩容", "炸弹爆炸范围提升。", 3, false),
                 new RogueUpgrade(UpgradeKind.BombChain, UpgradeFaction.Explosion, UpgradeRarity.Rare, "连锁引爆", "炸弹更容易点燃全场特效。", 1, false),
                 new RogueUpgrade(UpgradeKind.BombSpawn, UpgradeFaction.Explosion, UpgradeRarity.Common, "越炸越多", "本轮触发2次以上爆炸时生成炸弹。", 3, false),
                 new RogueUpgrade(UpgradeKind.ExplosionAftershock, UpgradeFaction.Explosion, UpgradeRarity.Rare, "爆炸余波", "炸弹额外清除周围棋子。", 2, false),
 
-                new RogueUpgrade(UpgradeKind.RocketCore, UpgradeFaction.Rocket, UpgradeRarity.Common, "火箭核心", "每清除30个棋子，生成1个火箭。", 1, true),
+                new RogueUpgrade(UpgradeKind.RocketCore, UpgradeFaction.Rocket, UpgradeRarity.Common, "火箭核心", "单个火箭从短程升级为整行/整列，并解锁火箭树。", 1, true),
                 new RogueUpgrade(UpgradeKind.RocketSplit, UpgradeFaction.Rocket, UpgradeRarity.Rare, "火箭分裂", "火箭额外扫过交叉方向。", 2, false),
                 new RogueUpgrade(UpgradeKind.RocketExtra, UpgradeFaction.Rocket, UpgradeRarity.Common, "额外发射", "每第2个火箭额外扫相邻轨道。", 3, false),
                 new RogueUpgrade(UpgradeKind.RocketSpawn, UpgradeFaction.Rocket, UpgradeRarity.Common, "火箭补给", "每轮清除后有概率生成火箭。", 3, false),
                 new RogueUpgrade(UpgradeKind.RocketOnHit, UpgradeFaction.Rocket, UpgradeRarity.Rare, "扫屏回响", "火箭命中后更容易留下新火箭。", 2, false),
 
-                new RogueUpgrade(UpgradeKind.RainbowCore, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩虹核心", "解锁彩虹树，强化彩球连锁。", 1, true),
+                new RogueUpgrade(UpgradeKind.RainbowCore, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩虹核心", "彩球清除目标颜色100%，每关开局生成1个。", 1, true),
                 new RogueUpgrade(UpgradeKind.RainbowCopy, UpgradeFaction.Rainbow, UpgradeRarity.Epic, "彩虹复制", "每局前2次彩球触发后必定复制。", 2, false),
                 new RogueUpgrade(UpgradeKind.RainbowAfterSpecial, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩虹裂变", "彩球触发后生成随机特效。", 3, false),
                 new RogueUpgrade(UpgradeKind.RainbowChainBomb, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩爆连锁", "彩球触发时额外制造爆点。", 2, false),
