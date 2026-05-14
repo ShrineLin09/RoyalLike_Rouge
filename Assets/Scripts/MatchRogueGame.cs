@@ -3097,6 +3097,11 @@ namespace MatchRogue
                 return new PendingSpecial(position, specialKind);
             }
 
+            if (strongestGroup.Positions.Count == 3 && HasUpgrade(UpgradeKind.PropellerRebirth))
+            {
+                return new PendingSpecial(position, SpecialKind.Propeller);
+            }
+
             return null;
         }
 
@@ -3613,6 +3618,7 @@ namespace MatchRogue
                 new RogueUpgrade(UpgradeKind.PropellerReserve, UpgradeFaction.Propeller, UpgradeRarity.Common, "螺旋储备", "开局时额外生成1/2/3个螺旋桨。", 3, false),
                 new RogueUpgrade(UpgradeKind.PropellerDamage, UpgradeFaction.Propeller, UpgradeRarity.Common, "螺旋扩容", "螺旋桨触发时，对障碍物的伤害+1/2/3。", 3, false),
                 new RogueUpgrade(UpgradeKind.PropellerBoost, UpgradeFaction.Propeller, UpgradeRarity.Common, "螺旋增压", "螺旋桨原地爆炸时的范围扩大为横纵方向的2/3格。", 2, false),
+                new RogueUpgrade(UpgradeKind.PropellerRebirth, UpgradeFaction.Propeller, UpgradeRarity.Epic, "螺旋重生", "普通三连时，也会生成一个螺旋桨。", 1, false),
 
                 new RogueUpgrade(UpgradeKind.RemoveRed, UpgradeFaction.General, UpgradeRarity.Common, "红色警告", "移除所有红色方块。", 1, false),
                 new RogueUpgrade(UpgradeKind.RemoveBlue, UpgradeFaction.General, UpgradeRarity.Common, "蓝色警告", "移除所有蓝色方块。", 1, false),
@@ -4083,6 +4089,7 @@ namespace MatchRogue
             PropellerReserve,
             PropellerDamage,
             PropellerBoost,
+            PropellerRebirth,
             RemoveRed,
             RemoveBlue,
             RemoveYellow,
