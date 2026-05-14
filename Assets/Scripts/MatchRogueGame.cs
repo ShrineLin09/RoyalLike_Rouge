@@ -124,6 +124,7 @@ namespace MatchRogue
         private readonly List<RogueUpgrade> activeUpgrades = new List<RogueUpgrade>();
         private readonly HashSet<int> removedTileTypes = new HashSet<int>();
         private readonly Dictionary<Vector2Int, int> crateDamageBonuses = new Dictionary<Vector2Int, int>();
+        private readonly Dictionary<UpgradeFaction, int> missedCoreFactionChoiceCounts = new Dictionary<UpgradeFaction, int>();
         private readonly List<PendingSpecial> pendingPostClearSpecials = new List<PendingSpecial>();
         private readonly System.Random rng = new System.Random();
 
@@ -457,6 +458,7 @@ namespace MatchRogue
             activeUpgrades.Clear();
             removedTileTypes.Clear();
             crateDamageBonuses.Clear();
+            missedCoreFactionChoiceCounts.Clear();
             pendingPostClearSpecials.Clear();
             selected = null;
             inputLocked = false;
@@ -3332,39 +3334,80 @@ namespace MatchRogue
         {
             var pool = GetUpgradePool()
                 .Where(upgrade => GetUpgradeLevel(upgrade.Kind) < upgrade.MaxLevel)
+                .Where(upgrade => completedRoom != 0 || upgrade.Rarity != UpgradeRarity.Epic)
                 .Where(IsUpgradeUnlocked)
                 .ToList();
 
-            if (pool.Count == 0)
-            {
-                pool = GetUpgradePool()
-                    .Where(upgrade => upgrade.IsCore && GetUpgradeLevel(upgrade.Kind) < upgrade.MaxLevel)
-                    .ToList();
-            }
-
             var choices = new List<RogueUpgrade>();
-            if (completedRoom <= 1)
+            for (var i = 0; i < upgradeButtons.Length; i++)
             {
-                var coreChoices = pool
-                    .Where(upgrade => upgrade.IsCore)
-                    .OrderBy(_ => rng.Next())
-                    .ToList();
-                if (coreChoices.Count > 0)
+                var rarity = RollChoiceRarity(completedRoom);
+                var picked = PickUpgradeForRarity(pool, choices, rarity);
+                if (!string.IsNullOrEmpty(picked.Name))
                 {
-                    var forcedCore = coreChoices[0];
-                    choices.Add(forcedCore);
-                    pool.RemoveAll(upgrade => upgrade.Kind == forcedCore.Kind);
+                    choices.Add(picked);
                 }
             }
 
-            while (choices.Count < upgradeButtons.Length && pool.Count > 0)
+            ApplyUpgradeChoiceGuarantees(completedRoom, pool, choices);
+            UpdateCoreFactionChoiceMemory(choices);
+            return choices.ToArray();
+        }
+
+        private UpgradeRarity RollChoiceRarity(int completedRoom)
+        {
+            var roll = rng.NextDouble();
+            switch (Mathf.Clamp(completedRoom, 0, 3))
             {
-                var picked = PickWeightedUpgrade(pool);
-                choices.Add(picked);
-                pool.RemoveAll(upgrade => upgrade.Kind == picked.Kind);
+                case 0:
+                    return roll < 0.85 ? UpgradeRarity.Common : UpgradeRarity.Rare;
+                case 1:
+                    return roll < 0.70 ? UpgradeRarity.Common : roll < 0.95 ? UpgradeRarity.Rare : UpgradeRarity.Epic;
+                case 2:
+                    return roll < 0.50 ? UpgradeRarity.Common : roll < 0.90 ? UpgradeRarity.Rare : UpgradeRarity.Epic;
+                default:
+                    return roll < 0.30 ? UpgradeRarity.Common : roll < 0.80 ? UpgradeRarity.Rare : UpgradeRarity.Epic;
+            }
+        }
+
+        private RogueUpgrade PickUpgradeForRarity(List<RogueUpgrade> pool, List<RogueUpgrade> choices, UpgradeRarity rarity)
+        {
+            foreach (var candidateRarity in GetRarityFallbacks(rarity))
+            {
+                var rarityPool = pool
+                    .Where(upgrade => upgrade.Rarity == candidateRarity)
+                    .Where(upgrade => choices.All(choice => choice.Kind != upgrade.Kind))
+                    .ToList();
+                if (rarityPool.Count > 0)
+                {
+                    return PickWeightedUpgrade(rarityPool);
+                }
             }
 
-            return choices.ToArray();
+            var fallbackPool = pool
+                .Where(upgrade => choices.All(choice => choice.Kind != upgrade.Kind))
+                .ToList();
+            return fallbackPool.Count > 0 ? PickWeightedUpgrade(fallbackPool) : default;
+        }
+
+        private IEnumerable<UpgradeRarity> GetRarityFallbacks(UpgradeRarity rarity)
+        {
+            if (rarity == UpgradeRarity.Epic)
+            {
+                yield return UpgradeRarity.Epic;
+                yield return UpgradeRarity.Rare;
+                yield return UpgradeRarity.Common;
+                yield break;
+            }
+
+            if (rarity == UpgradeRarity.Rare)
+            {
+                yield return UpgradeRarity.Rare;
+                yield return UpgradeRarity.Common;
+                yield break;
+            }
+
+            yield return UpgradeRarity.Common;
         }
 
         private RogueUpgrade PickWeightedUpgrade(List<RogueUpgrade> pool)
@@ -3374,7 +3417,7 @@ namespace MatchRogue
             foreach (var upgrade in pool)
             {
                 roll -= GetUpgradeWeight(upgrade);
-                if (roll <= 0)
+                if (roll <= 0f)
                 {
                     return upgrade;
                 }
@@ -3383,21 +3426,86 @@ namespace MatchRogue
             return pool[pool.Count - 1];
         }
 
+        private void ApplyUpgradeChoiceGuarantees(int completedRoom, List<RogueUpgrade> pool, List<RogueUpgrade> choices)
+        {
+            if (completedRoom == 0 && choices.All(upgrade => !upgrade.IsCore))
+            {
+                var corePool = pool
+                    .Where(upgrade => upgrade.IsCore)
+                    .Where(upgrade => choices.All(choice => choice.Kind != upgrade.Kind))
+                    .ToList();
+                if (corePool.Count > 0)
+                {
+                    ReplaceChoice(choices, PickWeightedUpgrade(corePool));
+                }
+            }
+
+            if (completedRoom == 3 && choices.All(upgrade => upgrade.Rarity == UpgradeRarity.Common))
+            {
+                var highRarityPool = pool
+                    .Where(upgrade => upgrade.Rarity == UpgradeRarity.Rare || upgrade.Rarity == UpgradeRarity.Epic)
+                    .Where(upgrade => choices.All(choice => choice.Kind != upgrade.Kind))
+                    .ToList();
+                if (highRarityPool.Count > 0)
+                {
+                    ReplaceChoice(choices, PickWeightedUpgrade(highRarityPool));
+                }
+            }
+        }
+
+        private void ReplaceChoice(List<RogueUpgrade> choices, RogueUpgrade upgrade)
+        {
+            if (string.IsNullOrEmpty(upgrade.Name))
+            {
+                return;
+            }
+
+            if (choices.Count < upgradeButtons.Length)
+            {
+                choices.Add(upgrade);
+                return;
+            }
+
+            choices[rng.Next(choices.Count)] = upgrade;
+        }
+
         private float GetUpgradeWeight(RogueUpgrade upgrade)
         {
+            var weight = upgrade.IsCore ? 0.85f : 1f;
             if (upgrade.Faction == UpgradeFaction.General)
             {
-                return pendingRewardAfterRoom <= 1 ? 12f : 18f;
+                return weight;
             }
 
-            if (upgrade.IsCore)
+            if (HasFactionCore(upgrade.Faction))
             {
-                return HasAnyCore() ? 22f : 95f;
+                weight *= 1.8f + Mathf.Max(0, GetFactionInvestment(upgrade.Faction) - 1) * 0.4f;
+                if (missedCoreFactionChoiceCounts.TryGetValue(upgrade.Faction, out var missedCount) && missedCount >= 2)
+                {
+                    weight *= 1.5f;
+                }
             }
 
-            var factionLevel = GetFactionInvestment(upgrade.Faction);
-            var roomBonus = pendingRewardAfterRoom >= 2 ? 18f : 0f;
-            return 62f + factionLevel * 28f + roomBonus;
+            return weight;
+        }
+
+        private void UpdateCoreFactionChoiceMemory(List<RogueUpgrade> choices)
+        {
+            foreach (var faction in GetOwnedCoreFactions())
+            {
+                var sawFaction = choices.Any(upgrade => upgrade.Faction == faction);
+                missedCoreFactionChoiceCounts[faction] = sawFaction
+                    ? 0
+                    : (missedCoreFactionChoiceCounts.TryGetValue(faction, out var current) ? current : 0) + 1;
+            }
+        }
+
+        private IEnumerable<UpgradeFaction> GetOwnedCoreFactions()
+        {
+            return activeUpgrades
+                .Where(upgrade => upgrade.IsCore)
+                .Select(upgrade => upgrade.Faction)
+                .Distinct();
         }
 
         private bool IsUpgradeUnlocked(RogueUpgrade upgrade)
