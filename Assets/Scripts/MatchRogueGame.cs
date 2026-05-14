@@ -816,20 +816,97 @@ namespace MatchRogue
 
         private int RollTileTypeAvoidingMatch(int x, int y)
         {
-            for (var attempts = 0; attempts < 20; attempts++)
+            foreach (var type in Enumerable.Range(0, TileTypes).OrderBy(_ => rng.Next()))
             {
-                var type = rng.Next(TileTypes);
-                var horizontal = x >= 2 && board[x - 1, y] != null && board[x - 2, y] != null &&
-                                 board[x - 1, y].Type == type && board[x - 2, y].Type == type;
-                var vertical = y >= 2 && board[x, y - 1] != null && board[x, y - 2] != null &&
-                               board[x, y - 1].Type == type && board[x, y - 2].Type == type;
-                if (!horizontal && !vertical)
+                if (!WouldCreateImmediateMatch(x, y, type))
                 {
                     return type;
                 }
             }
 
             return rng.Next(TileTypes);
+        }
+
+        private bool WouldCreateImmediateMatch(int x, int y, int type)
+        {
+            return WouldCreateLineMatch(x, y, type) || WouldCreateSquareMatch(x, y, type);
+        }
+
+        private bool WouldCreateLineMatch(int x, int y, int type)
+        {
+            var horizontalCount = 1 + CountMatchingPreviewTiles(x, y, -1, 0, type) + CountMatchingPreviewTiles(x, y, 1, 0, type);
+            if (horizontalCount >= 3)
+            {
+                return true;
+            }
+
+            var verticalCount = 1 + CountMatchingPreviewTiles(x, y, 0, -1, type) + CountMatchingPreviewTiles(x, y, 0, 1, type);
+            return verticalCount >= 3;
+        }
+
+        private int CountMatchingPreviewTiles(int x, int y, int dx, int dy, int type)
+        {
+            var count = 0;
+            var current = new Vector2Int(x + dx, y + dy);
+            while (IsInside(current) && IsPreviewMatchTile(current, type))
+            {
+                count++;
+                current += new Vector2Int(dx, dy);
+            }
+
+            return count;
+        }
+
+        private bool WouldCreateSquareMatch(int x, int y, int type)
+        {
+            for (var offsetX = -1; offsetX <= 0; offsetX++)
+            {
+                for (var offsetY = -1; offsetY <= 0; offsetY++)
+                {
+                    var originX = x + offsetX;
+                    var originY = y + offsetY;
+                    if (originX < 0 || originY < 0 || originX + 1 >= Width || originY + 1 >= Height)
+                    {
+                        continue;
+                    }
+
+                    var formsSquare = true;
+                    for (var squareX = originX; squareX <= originX + 1; squareX++)
+                    {
+                        for (var squareY = originY; squareY <= originY + 1; squareY++)
+                        {
+                            if (squareX == x && squareY == y)
+                            {
+                                continue;
+                            }
+
+                            if (!IsPreviewMatchTile(new Vector2Int(squareX, squareY), type))
+                            {
+                                formsSquare = false;
+                                break;
+                            }
+                        }
+
+                        if (!formsSquare)
+                        {
+                            break;
+                        }
+                    }
+
+                    if (formsSquare)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsPreviewMatchTile(Vector2Int pos, int type)
+        {
+            var tile = board[pos.x, pos.y];
+            return tile != null && tile.Special == SpecialKind.None && tile.CrateHealth <= 0 && tile.Type == type;
         }
 
         private Tile CreateTile(int x, int y, int type)
@@ -3078,7 +3155,7 @@ namespace MatchRogue
                 {
                     if (board[x, y] == null)
                     {
-                        board[x, y] = CreateTile(x, y, rng.Next(TileTypes));
+                        board[x, y] = CreateTile(x, y, RollTileTypeAvoidingMatch(x, y));
                         var target = GridToWorld(x, y);
                         var start = GridToWorld(x, Height + spawnIndex);
                         board[x, y].Object.transform.position = start;
