@@ -2659,14 +2659,26 @@ namespace MatchRogue
 
         private void SeedShowcaseSpecialsForRoom()
         {
-            if (HasUpgrade(UpgradeKind.ExplosionCore))
+            var bombCount = (HasUpgrade(UpgradeKind.ExplosionCore) ? 1 : 0) + GetUpgradeLevel(UpgradeKind.BombReserve);
+            for (var i = 0; i < bombCount; i++)
             {
                 CreateSpecialOnRandomColorTile(SpecialKind.Bomb);
             }
 
-            if (HasUpgrade(UpgradeKind.RainbowCore))
+            var rainbowCount = (HasUpgrade(UpgradeKind.RainbowCore) ? 1 : 0) + GetUpgradeLevel(UpgradeKind.RainbowReserve);
+            for (var i = 0; i < rainbowCount; i++)
             {
                 CreateSpecialOnRandomColorTile(SpecialKind.Rainbow);
+            }
+
+            for (var i = 0; i < GetUpgradeLevel(UpgradeKind.RocketReserve); i++)
+            {
+                CreateSpecialOnRandomColorTile(RollRocketSpecial());
+            }
+
+            for (var i = 0; i < GetUpgradeLevel(UpgradeKind.PropellerReserve); i++)
+            {
+                CreateSpecialOnRandomColorTile(SpecialKind.Propeller);
             }
 
             if (room == 3)
@@ -3472,9 +3484,11 @@ namespace MatchRogue
                 new RogueUpgrade(UpgradeKind.ExplosionCore, UpgradeFaction.Explosion, UpgradeRarity.Common, "爆破核心", "单个炸弹从3x3升级为5x5，开局生成一个炸弹。", 1, true),
                 new RogueUpgrade(UpgradeKind.BombDamage, UpgradeFaction.Explosion, UpgradeRarity.Common, "炸弹扩容", "炸弹触发时，对障碍物的伤害+1/2/3。", 3, false),
                 new RogueUpgrade(UpgradeKind.BombSpawn, UpgradeFaction.Explosion, UpgradeRarity.Common, "越炸越多", "累计消除18/16/14个目标后生成炸弹。", 3, false),
+                new RogueUpgrade(UpgradeKind.BombReserve, UpgradeFaction.Explosion, UpgradeRarity.Rare, "炸弹储备", "开局时额外生成1/2/3个炸弹。", 3, false),
                 new RogueUpgrade(UpgradeKind.ExplosionAftershock, UpgradeFaction.Explosion, UpgradeRarity.Rare, "爆炸余波", "炸弹被手动触发后，在触发处留下一个火箭。", 1, false),
 
                 new RogueUpgrade(UpgradeKind.RocketCore, UpgradeFaction.Rocket, UpgradeRarity.Common, "火箭核心", "单个火箭从短程升级为整行/整列，并解锁火箭树。", 1, true),
+                new RogueUpgrade(UpgradeKind.RocketReserve, UpgradeFaction.Rocket, UpgradeRarity.Common, "火箭储备", "开局时额外生成1/2/3个火箭。", 3, false),
                 new RogueUpgrade(UpgradeKind.RocketDamage, UpgradeFaction.Rocket, UpgradeRarity.Common, "火箭扩容", "火箭触发时，对障碍物的伤害+1/2/3。", 3, false),
                 new RogueUpgrade(UpgradeKind.RocketSpawn, UpgradeFaction.Rocket, UpgradeRarity.Common, "火箭补给", "累计消除16/14/12个目标后生成火箭。", 3, false),
                 new RogueUpgrade(UpgradeKind.RocketAftershock, UpgradeFaction.Rocket, UpgradeRarity.Common, "火箭余波", "火箭被手动触发后，在触发处留下一个螺旋桨。", 1, false),
@@ -3483,10 +3497,12 @@ namespace MatchRogue
                 new RogueUpgrade(UpgradeKind.RainbowCore, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩虹核心", "彩球清除100%的目标颜色，开局生成一个彩球。", 1, true),
                 new RogueUpgrade(UpgradeKind.RainbowSpawn, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩虹凝结", "累计消除28/24/20个目标后生成彩球。", 3, false),
                 new RogueUpgrade(UpgradeKind.RainbowAftershock, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩虹余波", "彩球被手动触发后，在触发处留下一个炸弹。", 1, false),
-                new RogueUpgrade(UpgradeKind.RainbowMutation, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩虹异变", "彩球触发后，被消除的方块处有30%/50%/70%概率生成螺旋桨。", 3, false),
+                new RogueUpgrade(UpgradeKind.RainbowReserve, UpgradeFaction.Rainbow, UpgradeRarity.Epic, "彩虹储备", "开局时额外生成1/2个彩球。", 2, false),
+                new RogueUpgrade(UpgradeKind.RainbowMutation, UpgradeFaction.Rainbow, UpgradeRarity.Epic, "彩虹异变", "彩球触发后，被消除的方块处有30%/50%/70%概率生成螺旋桨。", 3, false),
 
                 new RogueUpgrade(UpgradeKind.PropellerCore, UpgradeFaction.Propeller, UpgradeRarity.Common, "螺旋核心", "单个螺旋桨额外锁定1个关键目标。", 1, true),
                 new RogueUpgrade(UpgradeKind.PropellerSpawn, UpgradeFaction.Propeller, UpgradeRarity.Common, "起飞补给", "累计消除14/12/10个目标后生成螺旋桨。", 3, false),
+                new RogueUpgrade(UpgradeKind.PropellerReserve, UpgradeFaction.Propeller, UpgradeRarity.Common, "螺旋储备", "开局时额外生成1/2/3个螺旋桨。", 3, false),
                 new RogueUpgrade(UpgradeKind.PropellerDamage, UpgradeFaction.Propeller, UpgradeRarity.Common, "螺旋扩容", "螺旋桨触发时，对障碍物的伤害+1/2/3。", 3, false),
                 new RogueUpgrade(UpgradeKind.PropellerBoost, UpgradeFaction.Propeller, UpgradeRarity.Common, "螺旋增压", "螺旋桨原地爆炸时的范围扩大为横纵方向的2/3格。", 2, false),
 
@@ -3941,8 +3957,10 @@ namespace MatchRogue
             ExplosionCore,
             BombDamage,
             BombSpawn,
+            BombReserve,
             ExplosionAftershock,
             RocketCore,
+            RocketReserve,
             RocketDamage,
             RocketAftershock,
             RocketSplit,
@@ -3950,9 +3968,11 @@ namespace MatchRogue
             RainbowCore,
             RainbowSpawn,
             RainbowAftershock,
+            RainbowReserve,
             RainbowMutation,
             PropellerCore,
             PropellerSpawn,
+            PropellerReserve,
             PropellerDamage,
             PropellerBoost,
             RemoveRed,
