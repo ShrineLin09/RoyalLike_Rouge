@@ -122,6 +122,9 @@ namespace MatchRogue
 
         private Tile[,] board;
         private readonly List<RogueUpgrade> activeUpgrades = new List<RogueUpgrade>();
+        private readonly HashSet<int> removedTileTypes = new HashSet<int>();
+        private readonly Dictionary<Vector2Int, int> crateDamageBonuses = new Dictionary<Vector2Int, int>();
+        private readonly List<PendingSpecial> pendingPostClearSpecials = new List<PendingSpecial>();
         private readonly System.Random rng = new System.Random();
 
         private Camera mainCamera;
@@ -166,9 +169,6 @@ namespace MatchRogue
         private int rocketSpawnClearProgress;
         private int rainbowSpawnClearProgress;
         private int propellerSpawnClearProgress;
-        private int pendingRainbowCopySpawns;
-        private int pendingBridgeBombSpawns;
-        private int pendingBridgeRocketSpawns;
         private float tileSpacing = 1f;
         private float tileScale = 0.82f;
         private Vector3 boardOrigin;
@@ -455,6 +455,9 @@ namespace MatchRogue
             room = 1;
             pendingRewardAfterRoom = 0;
             activeUpgrades.Clear();
+            removedTileTypes.Clear();
+            crateDamageBonuses.Clear();
+            pendingPostClearSpecials.Clear();
             selected = null;
             inputLocked = false;
             score = 0;
@@ -467,14 +470,11 @@ namespace MatchRogue
             rocketSpawnClearProgress = 0;
             rainbowSpawnClearProgress = 0;
             propellerSpawnClearProgress = 0;
-            pendingRainbowCopySpawns = 0;
-            pendingBridgeBombSpawns = 0;
-            pendingBridgeRocketSpawns = 0;
             MarkEffectiveAction();
             restartButton.GetComponentInChildren<Text>().text = "重新开始";
             restartButton.gameObject.SetActive(true);
             endlessButton.gameObject.SetActive(false);
-            StartRoom();
+            ShowUpgradeChoices();
         }
 
         private void StartRoom()
@@ -816,7 +816,7 @@ namespace MatchRogue
 
         private int RollTileTypeAvoidingMatch(int x, int y)
         {
-            foreach (var type in Enumerable.Range(0, TileTypes).OrderBy(_ => rng.Next()))
+            foreach (var type in GetAvailableTileTypes().OrderBy(_ => rng.Next()))
             {
                 if (!WouldCreateImmediateMatch(x, y, type))
                 {
@@ -824,7 +824,13 @@ namespace MatchRogue
                 }
             }
 
-            return rng.Next(TileTypes);
+            var fallbackTypes = GetAvailableTileTypes().ToList();
+            return fallbackTypes.Count > 0 ? fallbackTypes[rng.Next(fallbackTypes.Count)] : rng.Next(TileTypes);
+        }
+
+        private IEnumerable<int> GetAvailableTileTypes()
+        {
+            return Enumerable.Range(0, TileTypes).Where(type => !removedTileTypes.Contains(type));
         }
 
         private bool WouldCreateImmediateMatch(int x, int y, int type)
@@ -1175,14 +1181,16 @@ namespace MatchRogue
             movesRemaining = Mathf.Max(0, movesRemaining - 1);
 
             var clearSet = new HashSet<Vector2Int> { pos };
-            if (board[pos.x, pos.y].Special == SpecialKind.Rainbow)
+            var manualSpecial = board[pos.x, pos.y].Special;
+            PendingSpecial? aftershock = GetManualAftershock(pos, manualSpecial);
+            if (manualSpecial == SpecialKind.Rainbow)
             {
                 AddRainbowColorClear(GetMostCommonTileType(), clearSet);
                 ApplyRainbowBonusClears(pos, clearSet);
             }
 
             AwardScoreForClears(clearSet.Count);
-            ResolveClearSet(clearSet, null);
+            ResolveClearSet(clearSet, aftershock);
             return true;
         }
 
@@ -1219,6 +1227,7 @@ namespace MatchRogue
 
             var specialPos = first.Special != SpecialKind.None ? a : b;
             var normalPos = first.Special != SpecialKind.None ? b : a;
+            var manualSpecial = first.Special != SpecialKind.None ? first.Special : second.Special;
             var clearSet = new HashSet<Vector2Int> { specialPos };
             var matches = FindMatchGroups();
             foreach (var matchPos in matches.SelectMany(group => group.Positions))
@@ -1227,6 +1236,12 @@ namespace MatchRogue
             }
 
             var specialToCreate = DetermineSpecialKind(matches, GetPreferredSpecialSpawn(a, b, matches));
+            var aftershock = GetManualAftershock(specialPos, manualSpecial);
+            if (aftershock.HasValue)
+            {
+                specialToCreate = aftershock;
+            }
+
             if (board[specialPos.x, specialPos.y].Special == SpecialKind.Rainbow)
             {
                 AddRainbowColorClear(board[normalPos.x, normalPos.y].Type, clearSet);
@@ -1300,6 +1315,29 @@ namespace MatchRogue
 
             AwardScoreForClears(clearSet.Count);
             ResolveClearSet(clearSet, null);
+        }
+
+        private PendingSpecial? GetManualAftershock(Vector2Int pos, SpecialKind special)
+        {
+            if (special == SpecialKind.Bomb && HasUpgrade(UpgradeKind.ExplosionAftershock))
+            {
+                ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.ExplosionAftershock));
+                return new PendingSpecial(pos, RollRocketSpecial());
+            }
+
+            if (IsRocket(special) && HasUpgrade(UpgradeKind.RocketAftershock))
+            {
+                ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.RocketAftershock));
+                return new PendingSpecial(pos, SpecialKind.Propeller);
+            }
+
+            if (special == SpecialKind.Rainbow && HasUpgrade(UpgradeKind.RainbowAftershock))
+            {
+                ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.RainbowAftershock));
+                return new PendingSpecial(pos, SpecialKind.Bomb);
+            }
+
+            return null;
         }
 
         private void ResolvePropellerCombination(Vector2Int propellerPos, Vector2Int partnerPos, SpecialKind partnerSpecial, HashSet<Vector2Int> clearSet)
@@ -1529,12 +1567,6 @@ namespace MatchRogue
         private void AddBombClearPreview(Vector2Int target, HashSet<Vector2Int> affected)
         {
             var radius = HasUpgrade(UpgradeKind.ExplosionCore) ? 2 : 1;
-            radius += Mathf.Min(2, GetUpgradeLevel(UpgradeKind.BombRadius));
-            if (GetUpgradeLevel(UpgradeKind.ExplosionAftershock) > 0)
-            {
-                radius += 1;
-            }
-
             AddRadius(target, radius, affected);
         }
 
@@ -1568,7 +1600,13 @@ namespace MatchRogue
 
         private int GetMostCommonTileType()
         {
-            return Enumerable.Range(0, TileTypes)
+            var candidates = GetAvailableTileTypes().ToList();
+            if (candidates.Count == 0)
+            {
+                candidates = Enumerable.Range(0, TileTypes).ToList();
+            }
+
+            return candidates
                 .OrderByDescending(type => GetTilesOfType(type).Count)
                 .ThenBy(_ => rng.Next())
                 .First();
@@ -2179,8 +2217,14 @@ namespace MatchRogue
                     CreateSpecialTileAt(currentSpecial.Value);
                 }
 
+                foreach (var pendingSpecial in pendingPostClearSpecials)
+                {
+                    CreateSpecialTileAt(pendingSpecial);
+                }
+
+                pendingPostClearSpecials.Clear();
+
                 ApplyPostClearUpgradeSpawns(bonusClears);
-                ApplyDeterministicPostClearSpawns();
 
                 var fallMoves = ApplyGravity();
                 var spawnMoves = RefillBoard();
@@ -2286,7 +2330,8 @@ namespace MatchRogue
                 }
 
                 var wasScheduledToClear = finalClears.Contains(pos);
-                var destroyed = DamageCrate(pos);
+                crateDamageBonuses.TryGetValue(pos, out var bonusDamage);
+                var destroyed = DamageCrate(pos, 1 + bonusDamage);
                 if (!destroyed)
                 {
                     finalClears.Remove(pos);
@@ -2296,6 +2341,8 @@ namespace MatchRogue
                     DecorateTile(board[pos.x, pos.y]);
                 }
             }
+
+            crateDamageBonuses.Clear();
         }
 
         private void AddAdjacentCrates(Vector2Int center, HashSet<Vector2Int> output)
@@ -2318,11 +2365,11 @@ namespace MatchRogue
             }
         }
 
-        private bool DamageCrate(Vector2Int pos)
+        private bool DamageCrate(Vector2Int pos, int damage)
         {
             ClearSelectionIfAt(pos);
             var tile = board[pos.x, pos.y];
-            tile.CrateHealth--;
+            tile.CrateHealth -= Mathf.Max(1, damage);
             if (tile.CrateHealth <= 0)
             {
                 tile.Object.transform.localScale = Vector3.one * tileScale;
@@ -2334,6 +2381,24 @@ namespace MatchRogue
             StartCoroutine(AnimateCrateHit(tile));
             DecorateTile(tile);
             return false;
+        }
+
+        private void RegisterCrateDamageBonus(IEnumerable<Vector2Int> positions, int bonus)
+        {
+            if (bonus <= 0)
+            {
+                return;
+            }
+
+            foreach (var pos in positions)
+            {
+                if (!IsInside(pos))
+                {
+                    continue;
+                }
+
+                crateDamageBonuses[pos] = Mathf.Max(crateDamageBonuses.TryGetValue(pos, out var current) ? current : 0, bonus);
+            }
         }
 
         private IEnumerator AnimateCrateHit(Tile tile)
@@ -2502,32 +2567,10 @@ namespace MatchRogue
         private void ApplyPostClearUpgradeSpawns(HashSet<Vector2Int> clearedPositions)
         {
             var clearedCount = clearedPositions.Count;
-            TryCreateSpecialByClearProgress(UpgradeKind.BombSpawn, ref bombSpawnClearProgress, clearedCount, 18, 15, 12, () => SpecialKind.Bomb);
-            TryCreateSpecialByClearProgress(UpgradeKind.RocketSpawn, ref rocketSpawnClearProgress, clearedCount, 16, 13, 10, RollRocketSpecial);
+            TryCreateSpecialByClearProgress(UpgradeKind.BombSpawn, ref bombSpawnClearProgress, clearedCount, 18, 16, 14, () => SpecialKind.Bomb);
+            TryCreateSpecialByClearProgress(UpgradeKind.RocketSpawn, ref rocketSpawnClearProgress, clearedCount, 16, 14, 12, RollRocketSpecial);
             TryCreateSpecialByClearProgress(UpgradeKind.RainbowSpawn, ref rainbowSpawnClearProgress, clearedCount, 28, 24, 20, () => SpecialKind.Rainbow);
             TryCreateSpecialByClearProgress(UpgradeKind.PropellerSpawn, ref propellerSpawnClearProgress, clearedCount, 14, 12, 10, () => SpecialKind.Propeller);
-        }
-
-        private void ApplyDeterministicPostClearSpawns()
-        {
-            for (var i = 0; i < pendingRainbowCopySpawns; i++)
-            {
-                CreateSpecialOnRandomColorTile(SpecialKind.Rainbow);
-            }
-
-            for (var i = 0; i < pendingBridgeBombSpawns; i++)
-            {
-                CreateSpecialOnRandomColorTile(SpecialKind.Bomb);
-            }
-
-            for (var i = 0; i < pendingBridgeRocketSpawns; i++)
-            {
-                CreateSpecialOnRandomColorTile(rng.Next(2) == 0 ? SpecialKind.LineHorizontal : SpecialKind.LineVertical);
-            }
-
-            pendingRainbowCopySpawns = 0;
-            pendingBridgeBombSpawns = 0;
-            pendingBridgeRocketSpawns = 0;
         }
 
         private void TryCreateSpecialByClearProgress(UpgradeKind kind, ref int clearProgress, int clearedCount, int levelOneThreshold, int levelTwoThreshold, int levelThreeThreshold, Func<SpecialKind> specialFactory)
@@ -2616,6 +2659,11 @@ namespace MatchRogue
 
         private void SeedShowcaseSpecialsForRoom()
         {
+            if (HasUpgrade(UpgradeKind.ExplosionCore))
+            {
+                CreateSpecialOnRandomColorTile(SpecialKind.Bomb);
+            }
+
             if (HasUpgrade(UpgradeKind.RainbowCore))
             {
                 CreateSpecialOnRandomColorTile(SpecialKind.Rainbow);
@@ -2732,85 +2780,44 @@ namespace MatchRogue
                 }
             }
 
-            var extraLevel = GetUpgradeLevel(UpgradeKind.RocketExtra);
-            if (extraLevel > 0 && rocketActivationCount % 2 == 0)
-            {
-                ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.RocketExtra));
-                if (orientation == MatchOrientation.Horizontal)
-                {
-                    AddRow(Mathf.Clamp(pos.y + (rng.Next(2) == 0 ? -1 : 1), 0, Height - 1), output);
-                }
-                else
-                {
-                    AddColumn(Mathf.Clamp(pos.x + (rng.Next(2) == 0 ? -1 : 1), 0, Width - 1), output);
-                }
-            }
-
-            if (GetUpgradeLevel(UpgradeKind.BridgeRocketBomb) > 0)
-            {
-                ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.BridgeRocketBomb));
-                foreach (var hit in output.ToArray())
-                {
-                    if (IsInside(hit) && board[hit.x, hit.y] != null && board[hit.x, hit.y].Special == SpecialKind.Bomb)
-                    {
-                        AddBombClear(hit, output);
-                    }
-                }
-            }
+            RegisterCrateDamageBonus(output, GetUpgradeLevel(UpgradeKind.RocketDamage));
         }
 
         private void AddBombClear(Vector2Int pos, HashSet<Vector2Int> output)
         {
             var radius = HasUpgrade(UpgradeKind.ExplosionCore) ? 2 : 1;
-            radius += Mathf.Min(2, GetUpgradeLevel(UpgradeKind.BombRadius));
-            if (GetUpgradeLevel(UpgradeKind.BombRadius) > 0)
+            var damageBonus = GetUpgradeLevel(UpgradeKind.BombDamage);
+            if (damageBonus > 0)
             {
-                ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.BombRadius));
+                ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.BombDamage));
             }
 
-            if (GetUpgradeLevel(UpgradeKind.ExplosionAftershock) > 0)
-            {
-                ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.ExplosionAftershock));
-                radius += 1;
-            }
-
+            var affected = new HashSet<Vector2Int>();
+            AddRadius(pos, radius, affected);
+            RegisterCrateDamageBonus(affected, damageBonus);
             AddRadius(pos, radius, output);
         }
 
         private void ApplyRainbowBonusClears(Vector2Int pos, HashSet<Vector2Int> output)
         {
             rainbowActivationCount++;
-            if (GetUpgradeLevel(UpgradeKind.RainbowChainBomb) > 0)
+            var mutationLevel = GetUpgradeLevel(UpgradeKind.RainbowMutation);
+            if (mutationLevel > 0)
             {
-                ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.RainbowChainBomb));
-                AddRadius(pos, 1 + GetUpgradeLevel(UpgradeKind.RainbowChainBomb), output);
-            }
-
-            if (GetUpgradeLevel(UpgradeKind.RainbowCopy) > 0 && rainbowActivationCount <= 2)
-            {
-                ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.RainbowCopy));
-                pendingRainbowCopySpawns++;
-            }
-
-            if (GetUpgradeLevel(UpgradeKind.BridgeRainbowBomb) > 0)
-            {
-                ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.BridgeRainbowBomb));
-                var bomb = FindSpecialTile(SpecialKind.Bomb);
-                if (bomb.HasValue)
+                ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.RainbowMutation));
+                var chance = mutationLevel == 1 ? 0.3f : mutationLevel == 2 ? 0.5f : 0.7f;
+                foreach (var clearedPos in output.ToArray())
                 {
-                    AddBombClear(bomb.Value, output);
-                }
-                else
-                {
-                    pendingBridgeBombSpawns++;
-                }
-            }
+                    if (clearedPos == pos || !IsInside(clearedPos) || !IsColorTile(board[clearedPos.x, clearedPos.y]))
+                    {
+                        continue;
+                    }
 
-            if (GetUpgradeLevel(UpgradeKind.BridgeRainbowRocket) > 0)
-            {
-                ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.BridgeRainbowRocket));
-                AddBestRocketLine(output);
-                pendingBridgeRocketSpawns++;
+                    if ((float)rng.NextDouble() <= chance)
+                    {
+                        pendingPostClearSpecials.Add(new PendingSpecial(clearedPos, SpecialKind.Propeller));
+                    }
+                }
             }
         }
 
@@ -2829,18 +2836,36 @@ namespace MatchRogue
                 output.Add(coreTarget);
             }
 
-            if (GetUpgradeLevel(UpgradeKind.PropellerBlast) > 0)
+            if (GetUpgradeLevel(UpgradeKind.PropellerBoost) > 0)
             {
-                ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.PropellerBlast));
-                AddCross(target, output);
+                ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.PropellerBoost));
+                AddPropellerBoostArea(target, GetUpgradeLevel(UpgradeKind.PropellerBoost), output);
             }
 
-            if (GetUpgradeLevel(UpgradeKind.PropellerSwarm) > 0 && propellerActivationCount % 3 == 0)
+            RegisterCrateDamageBonus(output, GetUpgradeLevel(UpgradeKind.PropellerDamage));
+        }
+
+        private void AddPropellerBoostArea(Vector2Int center, int level, HashSet<Vector2Int> output)
+        {
+            var reach = Mathf.Clamp(level + 1, 2, 3);
+            output.Add(center);
+            for (var offset = 1; offset <= reach; offset++)
             {
-                ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.PropellerSwarm));
-                var swarmTarget = GetSmartPropellerTarget(PropellerTargetMode.Multi, reservedTargets);
-                reservedTargets.Add(swarmTarget);
-                output.Add(swarmTarget);
+                var positions = new[]
+                {
+                    new Vector2Int(center.x + offset, center.y),
+                    new Vector2Int(center.x - offset, center.y),
+                    new Vector2Int(center.x, center.y + offset),
+                    new Vector2Int(center.x, center.y - offset)
+                };
+
+                foreach (var pos in positions)
+                {
+                    if (IsInside(pos))
+                    {
+                        output.Add(pos);
+                    }
+                }
             }
         }
 
@@ -3226,7 +3251,9 @@ namespace MatchRogue
 
         private void ShowUpgradeChoices()
         {
-            upgradeText.text = $"第 {pendingRewardAfterRoom} 关完成\n选择一个技能进入第 {room} 关";
+            upgradeText.text = pendingRewardAfterRoom <= 0
+                ? "开局选择\n选择一个技能进入第 1 关"
+                : $"第 {pendingRewardAfterRoom} 关完成\n选择一个技能进入第 {room} 关";
 
             SetUpgradePanel(true);
             var choices = RollUpgradeChoices(pendingRewardAfterRoom);
@@ -3246,9 +3273,46 @@ namespace MatchRogue
                 button.onClick.RemoveAllListeners();
                 button.onClick.AddListener(() =>
                 {
-                    activeUpgrades.Add(upgrade);
+                    ApplyUpgradeSelection(upgrade);
                     StartRoom();
                 });
+            }
+        }
+
+        private void ApplyUpgradeSelection(RogueUpgrade upgrade)
+        {
+            activeUpgrades.Add(upgrade);
+            if (IsColorRemovalUpgrade(upgrade.Kind))
+            {
+                removedTileTypes.Add(GetRemovedTileType(upgrade.Kind));
+                ClearRemovedColorTiles(GetRemovedTileType(upgrade.Kind));
+            }
+        }
+
+        private void ClearRemovedColorTiles(int tileType)
+        {
+            if (board == null)
+            {
+                return;
+            }
+
+            for (var x = 0; x < Width; x++)
+            {
+                for (var y = 0; y < Height; y++)
+                {
+                    var tile = board[x, y];
+                    if (tile == null || tile.Type != tileType || tile.Special != SpecialKind.None || tile.CrateHealth > 0)
+                    {
+                        continue;
+                    }
+
+                    if (tile.Object != null)
+                    {
+                        Destroy(tile.Object);
+                    }
+
+                    board[x, y] = null;
+                }
             }
         }
 
@@ -3267,7 +3331,7 @@ namespace MatchRogue
             }
 
             var choices = new List<RogueUpgrade>();
-            if (completedRoom == 1)
+            if (completedRoom <= 1)
             {
                 var coreChoices = pool
                     .Where(upgrade => upgrade.IsCore)
@@ -3314,17 +3378,6 @@ namespace MatchRogue
                 return pendingRewardAfterRoom <= 1 ? 12f : 18f;
             }
 
-            if (upgrade.Faction == UpgradeFaction.Bridge)
-            {
-                if (!HasAnyCore())
-                {
-                    return 0f;
-                }
-
-                var bridgeRoomBonus = pendingRewardAfterRoom >= 3 ? 16f : 6f;
-                return bridgeRoomBonus + GetActiveBuildFactionCount() * 5f;
-            }
-
             if (upgrade.IsCore)
             {
                 return HasAnyCore() ? 22f : 95f;
@@ -3337,18 +3390,12 @@ namespace MatchRogue
 
         private bool IsUpgradeUnlocked(RogueUpgrade upgrade)
         {
-            if (upgrade.Kind == UpgradeKind.BridgeRainbowBomb)
+            if (IsColorRemovalUpgrade(upgrade.Kind))
             {
-                return HasUpgrade(UpgradeKind.RainbowCore) && HasUpgrade(UpgradeKind.ExplosionCore);
-            }
-
-            if (upgrade.Kind == UpgradeKind.BridgeRainbowRocket)
-            {
-                return HasUpgrade(UpgradeKind.RainbowCore) && HasUpgrade(UpgradeKind.RocketCore);
+                return removedTileTypes.Count < 3 && !removedTileTypes.Contains(GetRemovedTileType(upgrade.Kind));
             }
 
             return upgrade.Faction == UpgradeFaction.General ||
-                   upgrade.Faction == UpgradeFaction.Bridge && HasAnyCore() ||
                    upgrade.IsCore ||
                    HasFactionCore(upgrade.Faction);
         }
@@ -3387,33 +3434,68 @@ namespace MatchRogue
             return GetUpgradeLevel(kind) > 0;
         }
 
+        private bool IsColorRemovalUpgrade(UpgradeKind kind)
+        {
+            return kind == UpgradeKind.RemoveRed ||
+                   kind == UpgradeKind.RemoveBlue ||
+                   kind == UpgradeKind.RemoveYellow ||
+                   kind == UpgradeKind.RemoveOrange ||
+                   kind == UpgradeKind.RemovePurple ||
+                   kind == UpgradeKind.RemoveGreen;
+        }
+
+        private int GetRemovedTileType(UpgradeKind kind)
+        {
+            switch (kind)
+            {
+                case UpgradeKind.RemoveRed:
+                    return 0;
+                case UpgradeKind.RemoveBlue:
+                    return 1;
+                case UpgradeKind.RemoveGreen:
+                    return 2;
+                case UpgradeKind.RemoveYellow:
+                    return 3;
+                case UpgradeKind.RemovePurple:
+                    return 4;
+                case UpgradeKind.RemoveOrange:
+                    return 5;
+                default:
+                    return -1;
+            }
+        }
+
         private RogueUpgrade[] GetUpgradePool()
         {
             return new[]
             {
-                new RogueUpgrade(UpgradeKind.ExplosionCore, UpgradeFaction.Explosion, UpgradeRarity.Common, "爆破核心", "单个炸弹从3x3升级为5x5，并解锁爆破树。", 1, true),
-                new RogueUpgrade(UpgradeKind.BombRadius, UpgradeFaction.Explosion, UpgradeRarity.Common, "炸弹扩容", "炸弹爆炸范围提升。", 3, false),
-                new RogueUpgrade(UpgradeKind.BombSpawn, UpgradeFaction.Explosion, UpgradeRarity.Common, "越炸越多", "累计消除18/15/12个目标后生成炸弹。", 3, false),
-                new RogueUpgrade(UpgradeKind.ExplosionAftershock, UpgradeFaction.Explosion, UpgradeRarity.Rare, "爆炸余波", "炸弹额外清除周围棋子。", 2, false),
+                new RogueUpgrade(UpgradeKind.ExplosionCore, UpgradeFaction.Explosion, UpgradeRarity.Common, "爆破核心", "单个炸弹从3x3升级为5x5，开局生成一个炸弹。", 1, true),
+                new RogueUpgrade(UpgradeKind.BombDamage, UpgradeFaction.Explosion, UpgradeRarity.Common, "炸弹扩容", "炸弹触发时，对障碍物的伤害+1/2/3。", 3, false),
+                new RogueUpgrade(UpgradeKind.BombSpawn, UpgradeFaction.Explosion, UpgradeRarity.Common, "越炸越多", "累计消除18/16/14个目标后生成炸弹。", 3, false),
+                new RogueUpgrade(UpgradeKind.ExplosionAftershock, UpgradeFaction.Explosion, UpgradeRarity.Rare, "爆炸余波", "炸弹被手动触发后，在触发处留下一个火箭。", 1, false),
 
                 new RogueUpgrade(UpgradeKind.RocketCore, UpgradeFaction.Rocket, UpgradeRarity.Common, "火箭核心", "单个火箭从短程升级为整行/整列，并解锁火箭树。", 1, true),
-                new RogueUpgrade(UpgradeKind.RocketSplit, UpgradeFaction.Rocket, UpgradeRarity.Rare, "火箭分裂", "火箭额外扫过交叉方向。", 2, false),
-                new RogueUpgrade(UpgradeKind.RocketExtra, UpgradeFaction.Rocket, UpgradeRarity.Common, "额外发射", "每第2个火箭额外扫相邻轨道。", 3, false),
-                new RogueUpgrade(UpgradeKind.RocketSpawn, UpgradeFaction.Rocket, UpgradeRarity.Common, "火箭补给", "累计消除16/13/10个目标后生成火箭。", 3, false),
+                new RogueUpgrade(UpgradeKind.RocketDamage, UpgradeFaction.Rocket, UpgradeRarity.Common, "火箭扩容", "火箭触发时，对障碍物的伤害+1/2/3。", 3, false),
+                new RogueUpgrade(UpgradeKind.RocketSpawn, UpgradeFaction.Rocket, UpgradeRarity.Common, "火箭补给", "累计消除16/14/12个目标后生成火箭。", 3, false),
+                new RogueUpgrade(UpgradeKind.RocketAftershock, UpgradeFaction.Rocket, UpgradeRarity.Common, "火箭余波", "火箭被手动触发后，在触发处留下一个螺旋桨。", 1, false),
+                new RogueUpgrade(UpgradeKind.RocketSplit, UpgradeFaction.Rocket, UpgradeRarity.Epic, "火箭分裂", "火箭额外扫过交叉方向。", 1, false),
 
-                new RogueUpgrade(UpgradeKind.RainbowCore, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩虹核心", "彩球清除目标颜色100%，每关开局生成1个。", 1, true),
-                new RogueUpgrade(UpgradeKind.RainbowCopy, UpgradeFaction.Rainbow, UpgradeRarity.Epic, "彩虹复制", "每局前2次彩球触发后必定复制。", 2, false),
+                new RogueUpgrade(UpgradeKind.RainbowCore, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩虹核心", "彩球清除100%的目标颜色，开局生成一个彩球。", 1, true),
                 new RogueUpgrade(UpgradeKind.RainbowSpawn, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩虹凝结", "累计消除28/24/20个目标后生成彩球。", 3, false),
-                new RogueUpgrade(UpgradeKind.RainbowChainBomb, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩爆连锁", "彩球触发时额外制造爆点。", 2, false),
+                new RogueUpgrade(UpgradeKind.RainbowAftershock, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩虹余波", "彩球被手动触发后，在触发处留下一个炸弹。", 1, false),
+                new RogueUpgrade(UpgradeKind.RainbowMutation, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩虹异变", "彩球触发后，被消除的方块处有30%/50%/70%概率生成螺旋桨。", 3, false),
 
-                new RogueUpgrade(UpgradeKind.PropellerCore, UpgradeFaction.Propeller, UpgradeRarity.Common, "螺旋桨核心", "单个螺旋桨额外锁定1个关键目标，并解锁螺旋桨树。", 1, true),
+                new RogueUpgrade(UpgradeKind.PropellerCore, UpgradeFaction.Propeller, UpgradeRarity.Common, "螺旋核心", "单个螺旋桨额外锁定1个关键目标。", 1, true),
                 new RogueUpgrade(UpgradeKind.PropellerSpawn, UpgradeFaction.Propeller, UpgradeRarity.Common, "起飞补给", "累计消除14/12/10个目标后生成螺旋桨。", 3, false),
-                new RogueUpgrade(UpgradeKind.PropellerBlast, UpgradeFaction.Propeller, UpgradeRarity.Rare, "精准轰炸", "螺旋桨目标范围扩大。", 2, false),
-                new RogueUpgrade(UpgradeKind.PropellerSwarm, UpgradeFaction.Propeller, UpgradeRarity.Rare, "机群出动", "每第3个螺旋桨追加飞行一次。", 2, false),
+                new RogueUpgrade(UpgradeKind.PropellerDamage, UpgradeFaction.Propeller, UpgradeRarity.Common, "螺旋扩容", "螺旋桨触发时，对障碍物的伤害+1/2/3。", 3, false),
+                new RogueUpgrade(UpgradeKind.PropellerBoost, UpgradeFaction.Propeller, UpgradeRarity.Common, "螺旋增压", "螺旋桨原地爆炸时的范围扩大为横纵方向的2/3格。", 2, false),
 
-                new RogueUpgrade(UpgradeKind.BridgeRocketBomb, UpgradeFaction.Bridge, UpgradeRarity.Epic, "火药推进", "火箭与爆炸流更容易互相点燃。", 1, false),
-                new RogueUpgrade(UpgradeKind.BridgeRainbowBomb, UpgradeFaction.Bridge, UpgradeRarity.Epic, "彩虹燃爆", "彩球触发后优先引爆炸弹，否则生成炸弹。", 1, false),
-                new RogueUpgrade(UpgradeKind.BridgeRainbowRocket, UpgradeFaction.Bridge, UpgradeRarity.Epic, "彩虹制导", "彩球触发后生成火箭，并扫目标最多的行列。", 1, false)
+                new RogueUpgrade(UpgradeKind.RemoveRed, UpgradeFaction.General, UpgradeRarity.Common, "红色警告", "移除所有红色方块。", 1, false),
+                new RogueUpgrade(UpgradeKind.RemoveBlue, UpgradeFaction.General, UpgradeRarity.Common, "蓝色警告", "移除所有蓝色方块。", 1, false),
+                new RogueUpgrade(UpgradeKind.RemoveYellow, UpgradeFaction.General, UpgradeRarity.Common, "黄色警告", "移除所有黄色方块。", 1, false),
+                new RogueUpgrade(UpgradeKind.RemoveOrange, UpgradeFaction.General, UpgradeRarity.Common, "橙色警告", "移除所有橙色方块。", 1, false),
+                new RogueUpgrade(UpgradeKind.RemovePurple, UpgradeFaction.General, UpgradeRarity.Common, "紫色警告", "移除所有紫色方块。", 1, false),
+                new RogueUpgrade(UpgradeKind.RemoveGreen, UpgradeFaction.General, UpgradeRarity.Common, "绿色警告", "移除所有绿色方块。", 1, false)
             };
         }
 
@@ -3561,8 +3643,6 @@ namespace MatchRogue
                     return new Color(0.44f, 0.18f, 0.58f, 0.96f);
                 case UpgradeFaction.Propeller:
                     return new Color(0.15f, 0.48f, 0.32f, 0.96f);
-                case UpgradeFaction.Bridge:
-                    return new Color(0.54f, 0.42f, 0.12f, 0.96f);
                 case UpgradeFaction.General:
                     return new Color(0.28f, 0.27f, 0.32f, 0.96f);
                 default:
@@ -3582,8 +3662,6 @@ namespace MatchRogue
                     return "[彩虹]";
                 case UpgradeFaction.Propeller:
                     return "[辅助]";
-                case UpgradeFaction.Bridge:
-                    return "[桥接]";
                 case UpgradeFaction.General:
                     return "[通用]";
                 default:
@@ -3861,24 +3939,28 @@ namespace MatchRogue
         private enum UpgradeKind
         {
             ExplosionCore,
-            BombRadius,
+            BombDamage,
             BombSpawn,
             ExplosionAftershock,
             RocketCore,
+            RocketDamage,
+            RocketAftershock,
             RocketSplit,
-            RocketExtra,
             RocketSpawn,
             RainbowCore,
-            RainbowCopy,
             RainbowSpawn,
-            RainbowChainBomb,
+            RainbowAftershock,
+            RainbowMutation,
             PropellerCore,
             PropellerSpawn,
-            PropellerBlast,
-            PropellerSwarm,
-            BridgeRocketBomb,
-            BridgeRainbowBomb,
-            BridgeRainbowRocket
+            PropellerDamage,
+            PropellerBoost,
+            RemoveRed,
+            RemoveBlue,
+            RemoveYellow,
+            RemoveOrange,
+            RemovePurple,
+            RemoveGreen
         }
 
         private enum UpgradeFaction
@@ -3887,7 +3969,6 @@ namespace MatchRogue
             Rocket,
             Rainbow,
             Propeller,
-            Bridge,
             General
         }
 
