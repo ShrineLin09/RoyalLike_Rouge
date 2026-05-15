@@ -28,8 +28,8 @@ namespace MatchRogue
 
         private static readonly int[] RoomMoveLimits = { 32, 32, 34, 34, 36, 42 };
         private static readonly int[] RoomTargetScores = { 14000, 22000, 34000, 50000, 70000, 95000 };
-        private static readonly int[] RoomCrateCounts = { 13, 16, 22, 27, 32, 38 };
-        private static readonly int[] RoomTwoLayerCrateCounts = { 2, 4, 7, 10, 14, 18 };
+        private static readonly int[] RoomCrateCounts = { 14, 18, 24, 29, 34, 41 };
+        private static readonly int[] RoomTwoLayerCrateCounts = { 3, 4, 9, 14, 21, 25 };
         private static readonly int[] RoomThreeLayerCrateCounts = { 0, 0, 2, 4, 5, 8 };
         private static readonly LevelConfig[] LevelConfigs =
         {
@@ -47,9 +47,9 @@ namespace MatchRogue
                     ".........",
                     ".........",
                     "..11111..",
-                    ".1122111.",
+                    ".1122211.",
                     ".........",
-                    "....1....",
+                    "...1.1...",
                     "........."
                 }),
             new LevelConfig(
@@ -68,7 +68,7 @@ namespace MatchRogue
                     "....2....",
                     ".111.....",
                     ".........",
-                    ".........",
+                    ".1.....1.",
                     "........."
                 }),
             new LevelConfig(
@@ -86,9 +86,9 @@ namespace MatchRogue
                     "..2332...",
                     ".........",
                     "11.....11",
-                    "...11....",
+                    "...22....",
                     ".........",
-                    "........."
+                    ".1.....1."
                 }),
             new LevelConfig(
                 4,
@@ -105,7 +105,7 @@ namespace MatchRogue
                     ".........",
                     "1...3...1",
                     ".22...22.",
-                    "....1....",
+                    "...222...",
                     ".........",
                     "........."
                 }),
@@ -124,8 +124,8 @@ namespace MatchRogue
                     ".........",
                     "22.....22",
                     "13.....31",
-                    ".1..3..1.",
-                    "....1....",
+                    ".2..3..2.",
+                    "...222...",
                     "........."
                 }),
             new LevelConfig(
@@ -145,7 +145,7 @@ namespace MatchRogue
                     "23.....32",
                     "223...322",
                     "11.....11",
-                    "...11...."
+                    "..22222.."
                 })
         };
 
