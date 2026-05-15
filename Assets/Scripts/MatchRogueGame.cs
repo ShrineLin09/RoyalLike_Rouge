@@ -23,20 +23,20 @@ namespace MatchRogue
         private const float CascadePauseSeconds = 0.08f;
         private const float HintDelaySeconds = 7f;
         private const float StrongHintDelaySeconds = 12f;
-        private const int RoomsPerRun = 4;
+        private const int RoomsPerRun = 6;
 
-        private static readonly int[] RoomMoveLimits = { 34, 32, 30, 34 };
-        private static readonly int[] RoomTargetScores = { 14500, 23000, 36000, 56000 };
-        private static readonly int[] RoomCrateCounts = { 16, 22, 30, 38 };
-        private static readonly int[] RoomTwoLayerCrateCounts = { 2, 7, 13, 20 };
-        private static readonly int[] RoomThreeLayerCrateCounts = { 0, 0, 3, 7 };
+        private static readonly int[] RoomMoveLimits = { 32, 32, 34, 34, 36, 42 };
+        private static readonly int[] RoomTargetScores = { 14000, 22000, 34000, 50000, 70000, 95000 };
+        private static readonly int[] RoomCrateCounts = { 13, 16, 22, 27, 32, 38 };
+        private static readonly int[] RoomTwoLayerCrateCounts = { 2, 4, 7, 10, 14, 18 };
+        private static readonly int[] RoomThreeLayerCrateCounts = { 0, 0, 2, 4, 5, 8 };
         private static readonly LevelConfig[] LevelConfigs =
         {
             new LevelConfig(
                 1,
                 9,
                 11,
-                34,
+                32,
                 new[]
                 {
                     ".........",
@@ -45,11 +45,11 @@ namespace MatchRogue
                     ".........",
                     ".........",
                     ".........",
-                    ".........",
                     "..11111..",
-                    ".1122211.",
-                    "1.......1",
-                    "11.....11"
+                    ".1122111.",
+                    ".........",
+                    "....1....",
+                    "........."
                 }),
             new LevelConfig(
                 2,
@@ -59,33 +59,33 @@ namespace MatchRogue
                 new[]
                 {
                     ".........",
-                    "1.......1",
-                    "1.......1",
-                    "22.....22",
                     ".........",
-                    ".1111111.",
                     ".........",
-                    "22.....22",
-                    "1.......1",
-                    "1.......1",
+                    "..11111..",
+                    ".1122211.",
+                    ".........",
+                    "....2....",
+                    ".111.....",
+                    ".........",
+                    ".........",
                     "........."
                 }),
             new LevelConfig(
                 3,
                 9,
                 11,
-                30,
+                34,
                 new[]
                 {
                     ".........",
+                    ".........",
+                    ".........",
                     "..11111..",
                     ".1222221.",
-                    "..23332..",
-                    "...222...",
+                    "..2332...",
                     ".........",
                     "11.....11",
-                    "22.....22",
-                    "11.....11",
+                    "...11....",
                     ".........",
                     "........."
                 }),
@@ -98,15 +98,53 @@ namespace MatchRogue
                 {
                     ".........",
                     ".........",
-                    "111......",
-                    "22211....",
-                    "23322....",
-                    "23332....",
-                    "22222....",
+                    "..11111..",
+                    ".1222221.",
+                    ".1233321.",
                     ".........",
-                    "....22222",
-                    "....23332",
-                    "....22222"
+                    "1...3...1",
+                    ".22...22.",
+                    "....1....",
+                    ".........",
+                    "........."
+                }),
+            new LevelConfig(
+                5,
+                9,
+                11,
+                36,
+                new[]
+                {
+                    ".........",
+                    ".111.111.",
+                    ".222.222.",
+                    ".23...32.",
+                    ".22...22.",
+                    ".........",
+                    "22.....22",
+                    "13.....31",
+                    ".1..3..1.",
+                    "....1....",
+                    "........."
+                }),
+            new LevelConfig(
+                6,
+                9,
+                11,
+                42,
+                new[]
+                {
+                    "11.....11",
+                    "223...322",
+                    "23.....32",
+                    "22.....22",
+                    ".........",
+                    ".........",
+                    "22.....22",
+                    "23.....32",
+                    "223...322",
+                    "11.....11",
+                    "...11...."
                 })
         };
 
@@ -3374,16 +3412,20 @@ namespace MatchRogue
         private UpgradeRarity RollChoiceRarity(int completedRoom)
         {
             var roll = rng.NextDouble();
-            switch (Mathf.Clamp(completedRoom, 0, 3))
+            switch (Mathf.Clamp(completedRoom, 0, RoomsPerRun - 1))
             {
                 case 0:
                     return roll < 0.85 ? UpgradeRarity.Common : UpgradeRarity.Rare;
                 case 1:
-                    return roll < 0.70 ? UpgradeRarity.Common : roll < 0.95 ? UpgradeRarity.Rare : UpgradeRarity.Epic;
+                    return roll < 0.75 ? UpgradeRarity.Common : UpgradeRarity.Rare;
                 case 2:
+                    return roll < 0.65 ? UpgradeRarity.Common : roll < 0.95 ? UpgradeRarity.Rare : UpgradeRarity.Epic;
+                case 3:
                     return roll < 0.50 ? UpgradeRarity.Common : roll < 0.90 ? UpgradeRarity.Rare : UpgradeRarity.Epic;
+                case 4:
+                    return roll < 0.35 ? UpgradeRarity.Common : roll < 0.80 ? UpgradeRarity.Rare : UpgradeRarity.Epic;
                 default:
-                    return roll < 0.30 ? UpgradeRarity.Common : roll < 0.80 ? UpgradeRarity.Rare : UpgradeRarity.Epic;
+                    return roll < 0.20 ? UpgradeRarity.Common : roll < 0.70 ? UpgradeRarity.Rare : UpgradeRarity.Epic;
             }
         }
 
@@ -3445,19 +3487,17 @@ namespace MatchRogue
 
         private void ApplyUpgradeChoiceGuarantees(int completedRoom, List<RogueUpgrade> pool, List<RogueUpgrade> choices)
         {
-            if (completedRoom == 0 && choices.All(upgrade => !upgrade.IsCore))
+            if (completedRoom == 0)
             {
-                var corePool = pool
-                    .Where(upgrade => upgrade.IsCore)
-                    .Where(upgrade => choices.All(choice => choice.Kind != upgrade.Kind))
-                    .ToList();
-                if (corePool.Count > 0)
-                {
-                    ReplaceChoice(choices, PickWeightedUpgrade(corePool));
-                }
+                EnsureOpeningCoreChoices(pool, choices);
             }
 
-            if (completedRoom == 3 && choices.All(upgrade => upgrade.Rarity == UpgradeRarity.Common))
+            if (completedRoom == 1)
+            {
+                EnsureEarlyBuildStarter(pool, choices);
+            }
+
+            if (completedRoom >= 4 && choices.All(upgrade => upgrade.Rarity == UpgradeRarity.Common))
             {
                 var highRarityPool = pool
                     .Where(upgrade => upgrade.Rarity == UpgradeRarity.Rare || upgrade.Rarity == UpgradeRarity.Epic)
@@ -3467,6 +3507,85 @@ namespace MatchRogue
                 {
                     ReplaceChoice(choices, PickWeightedUpgrade(highRarityPool));
                 }
+            }
+        }
+
+        private void EnsureOpeningCoreChoices(List<RogueUpgrade> pool, List<RogueUpgrade> choices)
+        {
+            var missingCorePool = pool
+                .Where(upgrade => upgrade.IsCore)
+                .Where(upgrade => choices.All(choice => choice.Kind != upgrade.Kind))
+                .ToList();
+
+            if (choices.All(upgrade => !upgrade.IsCore) && missingCorePool.Count > 0)
+            {
+                var core = PickWeightedUpgrade(missingCorePool);
+                ReplaceChoice(choices, core);
+                missingCorePool.RemoveAll(upgrade => upgrade.Kind == core.Kind);
+            }
+
+            var distinctCoreCount = choices.Where(upgrade => upgrade.IsCore).Select(upgrade => upgrade.Faction).Distinct().Count();
+            if (distinctCoreCount < 2 && missingCorePool.Count > 0)
+            {
+                ReplaceNonCoreChoice(choices, PickWeightedUpgrade(missingCorePool));
+            }
+        }
+
+        private void EnsureEarlyBuildStarter(List<RogueUpgrade> pool, List<RogueUpgrade> choices)
+        {
+            var ownedCoreFactions = GetOwnedCoreFactions().ToList();
+            if (ownedCoreFactions.Count == 0 ||
+                choices.Any(upgrade => ownedCoreFactions.Contains(upgrade.Faction)) ||
+                choices.Any(upgrade => upgrade.Faction == UpgradeFaction.General && upgrade.Rarity != UpgradeRarity.Common))
+            {
+                return;
+            }
+
+            var starterPool = pool
+                .Where(upgrade => ownedCoreFactions.Contains(upgrade.Faction) || (upgrade.Faction == UpgradeFaction.General && upgrade.Rarity != UpgradeRarity.Common))
+                .Where(upgrade => choices.All(choice => choice.Kind != upgrade.Kind))
+                .ToList();
+            if (starterPool.Count > 0)
+            {
+                ReplaceChoice(choices, PickWeightedUpgrade(starterPool));
+            }
+        }
+
+        private void ReplaceNonCoreChoice(List<RogueUpgrade> choices, RogueUpgrade upgrade)
+        {
+            if (string.IsNullOrEmpty(upgrade.Name))
+            {
+                return;
+            }
+
+            var replaceIndex = choices.FindIndex(choice => !choice.IsCore);
+            if (replaceIndex >= 0)
+            {
+                choices[replaceIndex] = upgrade;
+                return;
+            }
+
+            if (choices.Count < upgradeButtons.Length)
+            {
+                choices.Add(upgrade);
+                return;
+            }
+
+            var duplicateCoreIndex = choices
+                .Select((choice, index) => new { choice, index })
+                .GroupBy(item => item.choice.Faction)
+                .Where(group => group.Count() > 1)
+                .SelectMany(group => group.Skip(1))
+                .Select(item => item.index)
+                .Cast<int?>()
+                .FirstOrDefault();
+            if (duplicateCoreIndex.HasValue)
+            {
+                choices[duplicateCoreIndex.Value] = upgrade;
+            }
+            else
+            {
+                ReplaceChoice(choices, upgrade);
             }
         }
 
@@ -3678,7 +3797,7 @@ namespace MatchRogue
         {
             targetScore = GetAdjustedTargetScore();
             statusText.text =
-                $"短Run  第 {room}/{RoomsPerRun} 关\n" +
+                $"Run  第 {room}/{RoomsPerRun} 关\n" +
                 $"目标：清除木箱  剩余 {remainingCrates}/{totalCrates}\n" +
                 $"分数 {score}\n" +
                 $"剩余步数 {movesRemaining} / {roomMoveLimit}\n" +
@@ -3707,13 +3826,17 @@ namespace MatchRogue
             switch (room)
             {
                 case 1:
-                    return "第1关：清掉少量木箱，通关后必出核心技能。";
+                    return "第1关：启动关，清掉少量木箱并确认Build方向。";
                 case 2:
-                    return "第2关：木箱变多，观察核心技能清目标。";
+                    return "第2关：Build启动关，木箱压力略微提升。";
                 case 3:
-                    return "第3关：利用Build处理更多双层木箱。";
+                    return "第3关：Build强化关，开始处理更多双层木箱。";
+                case 4:
+                    return "第4关：分叉/成型关，利用技能加速破局。";
+                case 5:
+                    return "第5关：爽感预演关，给连锁和特效留出空间。";
                 default:
-                    return "第4关：清空最多木箱，让Build表演起来。";
+                    return "第6关：高潮关，清空最高压力木箱并打出Build表现。";
             }
         }
 
