@@ -24,6 +24,7 @@ namespace MatchRogue
         private const float HintDelaySeconds = 7f;
         private const float StrongHintDelaySeconds = 12f;
         private const int RoomsPerRun = 6;
+        private const string LeaderboardPrefsKey = "MatchRogue.RunLeaderboard.v1";
 
         private static readonly int[] RoomMoveLimits = { 32, 32, 34, 34, 36, 42 };
         private static readonly int[] RoomTargetScores = { 14000, 22000, 34000, 50000, 70000, 95000 };
@@ -202,8 +203,16 @@ namespace MatchRogue
         private int comboChain;
         private int bestComboChain;
         private int rocketActivationCount;
+        private int bombActivationCount;
         private int rainbowActivationCount;
         private int propellerActivationCount;
+        private int clearedBoxCount;
+        private int boxDamageTotal;
+        private int maxSingleClearCount;
+        private int totalMovesUsed;
+        private int currentRunLeaderboardId;
+        private DateTime runStartTime;
+        private readonly List<int> levelRemainingMoves = new List<int>();
         private int bombSpawnClearProgress;
         private int rocketSpawnClearProgress;
         private int rainbowSpawnClearProgress;
@@ -505,8 +514,16 @@ namespace MatchRogue
             runScore = 0;
             bestComboChain = 0;
             rocketActivationCount = 0;
+            bombActivationCount = 0;
             rainbowActivationCount = 0;
             propellerActivationCount = 0;
+            clearedBoxCount = 0;
+            boxDamageTotal = 0;
+            maxSingleClearCount = 0;
+            totalMovesUsed = 0;
+            currentRunLeaderboardId = 0;
+            runStartTime = DateTime.Now;
+            levelRemainingMoves.Clear();
             bombSpawnClearProgress = 0;
             rocketSpawnClearProgress = 0;
             rainbowSpawnClearProgress = 0;
@@ -1207,7 +1224,7 @@ namespace MatchRogue
                 return;
             }
 
-            movesRemaining = Mathf.Max(0, movesRemaining - 1);
+            SpendMove();
             ResolveMatches(matches, GetPreferredSpecialSpawn(a, b, matches));
         }
 
@@ -1220,7 +1237,7 @@ namespace MatchRogue
 
             inputLocked = true;
             comboChain++;
-            movesRemaining = Mathf.Max(0, movesRemaining - 1);
+            SpendMove();
 
             var clearSet = new HashSet<Vector2Int> { pos };
             var manualSpecial = board[pos.x, pos.y].Special;
@@ -1243,6 +1260,12 @@ namespace MatchRogue
             board[b.x, b.y].Object.transform.position = GridToWorld(b.x, b.y);
         }
 
+        private void SpendMove()
+        {
+            movesRemaining = Mathf.Max(0, movesRemaining - 1);
+            totalMovesUsed++;
+        }
+
         private bool TryResolveSpecialSwap(Vector2Int a, Vector2Int b)
         {
             var first = board[a.x, a.y];
@@ -1259,7 +1282,7 @@ namespace MatchRogue
 
             inputLocked = true;
             comboChain++;
-            movesRemaining = Mathf.Max(0, movesRemaining - 1);
+            SpendMove();
 
             if (first.Special != SpecialKind.None && second.Special != SpecialKind.None)
             {
@@ -1303,6 +1326,7 @@ namespace MatchRogue
 
             if (firstSpecial == SpecialKind.Rainbow && secondSpecial == SpecialKind.Rainbow)
             {
+                rainbowActivationCount += 2;
                 AddEntireBoard(clearSet);
                 AwardScoreForClears(clearSet.Count);
                 ResolveClearSet(clearSet, null, false);
@@ -1332,6 +1356,7 @@ namespace MatchRogue
 
             if (firstIsRocket && secondIsRocket)
             {
+                rocketActivationCount += 2;
                 AddRow(b.y, clearSet);
                 AddColumn(b.x, clearSet);
                 AwardScoreForClears(clearSet.Count);
@@ -1341,6 +1366,7 @@ namespace MatchRogue
 
             if (firstSpecial == SpecialKind.Bomb && secondSpecial == SpecialKind.Bomb)
             {
+                bombActivationCount += 2;
                 AddRadius(b, 3, clearSet);
                 AwardScoreForClears(clearSet.Count);
                 ResolveClearSet(clearSet, null, false);
@@ -1349,6 +1375,8 @@ namespace MatchRogue
 
             if ((firstIsRocket && secondSpecial == SpecialKind.Bomb) || (secondIsRocket && firstSpecial == SpecialKind.Bomb))
             {
+                rocketActivationCount++;
+                bombActivationCount++;
                 AddStrongRocketBombClear(b, clearSet);
                 AwardScoreForClears(clearSet.Count);
                 ResolveClearSet(clearSet, null, false);
@@ -1384,6 +1412,7 @@ namespace MatchRogue
 
         private void ResolvePropellerCombination(Vector2Int propellerPos, Vector2Int partnerPos, SpecialKind partnerSpecial, HashSet<Vector2Int> clearSet)
         {
+            propellerActivationCount++;
             var reservedTargets = new HashSet<Vector2Int> { propellerPos, partnerPos };
             var mode = GetPropellerTargetMode(partnerSpecial);
             var target = GetSmartPropellerTarget(mode, reservedTargets);
@@ -1396,6 +1425,7 @@ namespace MatchRogue
             }
             else if (IsRocket(partnerSpecial))
             {
+                rocketActivationCount++;
                 if (partnerSpecial == SpecialKind.LineHorizontal)
                 {
                     AddRow(target.y, clearSet);
@@ -1407,6 +1437,7 @@ namespace MatchRogue
             }
             else if (partnerSpecial == SpecialKind.Propeller)
             {
+                propellerActivationCount++;
                 for (var i = 0; i < 3; i++)
                 {
                     var multiTarget = GetSmartPropellerTarget(PropellerTargetMode.Multi, reservedTargets);
@@ -1425,12 +1456,26 @@ namespace MatchRogue
 
         private void ResolveRainbowSpecialCombination(SpecialKind targetSpecial, HashSet<Vector2Int> clearSet)
         {
+            rainbowActivationCount++;
             var targetType = GetMostCommonTileType();
             var maxCount = targetSpecial == SpecialKind.Bomb ? 9 : IsRocket(targetSpecial) ? 14 : int.MaxValue;
             var positions = GetPrioritizedTilesOfType(targetType, maxCount);
             var specialToApply = IsRocket(targetSpecial)
                 ? (rng.Next(2) == 0 ? SpecialKind.LineHorizontal : SpecialKind.LineVertical)
                 : targetSpecial;
+
+            if (targetSpecial == SpecialKind.Bomb)
+            {
+                bombActivationCount += positions.Count;
+            }
+            else if (IsRocket(targetSpecial))
+            {
+                rocketActivationCount += positions.Count;
+            }
+            else if (targetSpecial == SpecialKind.Propeller)
+            {
+                propellerActivationCount += positions.Count;
+            }
 
             foreach (var pos in positions)
             {
@@ -2221,8 +2266,12 @@ namespace MatchRogue
             var scoreGain = clearCount * 80;
             scoreGain += comboChain > 1 ? comboChain * 40 : 0;
             score += scoreGain;
-            runScore += scoreGain;
             bestComboChain = Mathf.Max(bestComboChain, comboChain);
+        }
+
+        private void RecordClearPerformance(int clearCount)
+        {
+            maxSingleClearCount = Mathf.Max(maxSingleClearCount, clearCount);
         }
 
         private void ResolveClearSet(HashSet<Vector2Int> baseClears, PendingSpecial? specialToCreate, bool expandSpecials = true)
@@ -2253,6 +2302,7 @@ namespace MatchRogue
 
                 var normalClearedCount = CountNormalColorClears(bonusClears);
                 DamageCratesForClears(currentClears, bonusClears);
+                RecordClearPerformance(bonusClears.Count);
                 yield return AnimateAndRemoveClears(bonusClears);
 
                 if (currentSpecial.HasValue)
@@ -2412,11 +2462,14 @@ namespace MatchRogue
         {
             ClearSelectionIfAt(pos);
             var tile = board[pos.x, pos.y];
-            tile.CrateHealth -= Mathf.Max(1, damage);
+            var actualDamage = Mathf.Min(tile.CrateHealth, Mathf.Max(1, damage));
+            tile.CrateHealth -= actualDamage;
+            boxDamageTotal += actualDamage;
             if (tile.CrateHealth <= 0)
             {
                 tile.Object.transform.localScale = Vector3.one * tileScale;
                 remainingCrates = Mathf.Max(0, remainingCrates - 1);
+                clearedBoxCount++;
                 StartCoroutine(AnimateCrateBreak(tile));
                 return true;
             }
@@ -2844,6 +2897,7 @@ namespace MatchRogue
 
         private void AddBombClear(Vector2Int pos, HashSet<Vector2Int> output)
         {
+            bombActivationCount++;
             var radius = HasUpgrade(UpgradeKind.ExplosionCore) ? 2 : 1;
             var damageBonus = GetUpgradeLevel(UpgradeKind.BombDamage);
             if (damageBonus > 0)
@@ -3307,6 +3361,7 @@ namespace MatchRogue
         private void CompleteRoom()
         {
             inputLocked = true;
+            RecordCompletedRoomMoves();
             if (room >= RoomsPerRun)
             {
                 ShowRunSummary(true, RoomsPerRun);
@@ -3318,8 +3373,29 @@ namespace MatchRogue
             ShowUpgradeChoices();
         }
 
+        private void RecordCompletedRoomMoves()
+        {
+            var completedIndex = Mathf.Clamp(room - 1, 0, RoomsPerRun - 1);
+            while (levelRemainingMoves.Count < completedIndex)
+            {
+                levelRemainingMoves.Add(0);
+            }
+
+            if (levelRemainingMoves.Count == completedIndex)
+            {
+                levelRemainingMoves.Add(movesRemaining);
+            }
+            else
+            {
+                levelRemainingMoves[completedIndex] = movesRemaining;
+            }
+
+            runScore = levelRemainingMoves.Sum();
+        }
+
         private void ShowUpgradeChoices()
         {
+            ConfigureUpgradeTextForChoices();
             upgradeText.text = pendingRewardAfterRoom <= 0
                 ? "开局选择\n选择一个技能进入第 1 关"
                 : $"第 {pendingRewardAfterRoom} 关完成\n选择一个技能进入第 {room} 关";
@@ -3779,18 +3855,39 @@ namespace MatchRogue
         {
             inputLocked = true;
             SetUpgradePanel(false);
+            ConfigureUpgradeTextForSummary();
             upgradeText.gameObject.SetActive(true);
             restartButton.gameObject.SetActive(true);
             restartButton.GetComponentInChildren<Text>().text = "再来一局";
             endlessButton.gameObject.SetActive(false);
 
             var completedRooms = success ? RoomsPerRun : Mathf.Max(0, reachedRoom - 1);
+            var record = CreateRunRecord(success, reachedRoom, completedRooms);
+            var leaderboard = SaveLeaderboardRecord(record);
+            currentRunLeaderboardId = record.id;
             upgradeText.text =
-                $"{(success ? "Run 通关！" : "Run 失败")}\n" +
-                $"进度：第 {reachedRoom}/{RoomsPerRun} 关（已完成 {completedRooms} 关）\n" +
-                $"主要流派：{GetMainBuildName()}\n" +
-                $"本局技能：{FormatActiveUpgrades()}\n" +
-                $"总分 {runScore} / 最高连锁 {Mathf.Max(1, bestComboChain)}";
+                $"{(success ? "Run 完成" : $"Run 失败\n通关到第 {reachedRoom} 关")}\n" +
+                $"本次分数：{record.score}\n" +
+                $"{FormatLevelRemainingMoves(success, reachedRoom)}\n" +
+                $"已选择技能：\n{FormatSkillNamesForSummary()}\n\n" +
+                $"本局表现：\n{FormatRunStats(record)}\n\n" +
+                $"本地排行榜：\n{FormatLeaderboard(leaderboard, record.id)}";
+        }
+
+        private void ConfigureUpgradeTextForChoices()
+        {
+            upgradeText.fontSize = 40;
+            upgradeText.alignment = TextAnchor.MiddleCenter;
+            upgradeText.rectTransform.sizeDelta = new Vector2(1000f, 120f);
+            upgradeText.rectTransform.anchoredPosition = new Vector2(0f, -430f);
+        }
+
+        private void ConfigureUpgradeTextForSummary()
+        {
+            upgradeText.fontSize = 24;
+            upgradeText.alignment = TextAnchor.UpperCenter;
+            upgradeText.rectTransform.sizeDelta = new Vector2(1120f, 1180f);
+            upgradeText.rectTransform.anchoredPosition = new Vector2(0f, -185f);
         }
 
         private void RefreshStatus()
@@ -3802,8 +3899,140 @@ namespace MatchRogue
                 $"分数 {score}\n" +
                 $"剩余步数 {movesRemaining} / {roomMoveLimit}\n" +
                 $"Run总分 {runScore} / 最高连锁 {Mathf.Max(1, bestComboChain)}\n" +
-                $"已选强化：{FormatActiveUpgrades()}\n" +
+                $"已选强化：{FormatSkillNamesInline()}\n" +
                 GetRoomGoalText();
+        }
+
+        private RunLeaderboardRecord CreateRunRecord(bool success, int reachedRoom, int completedRooms)
+        {
+            var endTime = DateTime.Now;
+            runScore = levelRemainingMoves.Sum();
+            return new RunLeaderboardRecord
+            {
+                id = Environment.TickCount ^ endTime.GetHashCode(),
+                score = runScore,
+                timeTicks = endTime.Ticks,
+                completed = success,
+                reachedLevel = success ? RoomsPerRun : reachedRoom,
+                durationSeconds = Mathf.Max(0, (int)(endTime - runStartTime).TotalSeconds),
+                skillNames = activeUpgrades.Select(upgrade => upgrade.Name).ToArray(),
+                levelRemainingMoves = levelRemainingMoves.Take(completedRooms).ToArray(),
+                rocketTriggerCount = rocketActivationCount,
+                bombTriggerCount = bombActivationCount,
+                rainbowTriggerCount = rainbowActivationCount,
+                propellerTriggerCount = propellerActivationCount,
+                clearedBoxCount = clearedBoxCount,
+                boxDamageTotal = boxDamageTotal,
+                maxSingleClearCount = maxSingleClearCount,
+                maxComboCount = bestComboChain,
+                totalMovesUsed = totalMovesUsed
+            };
+        }
+
+        private List<RunLeaderboardRecord> SaveLeaderboardRecord(RunLeaderboardRecord record)
+        {
+            var leaderboard = LoadLeaderboard();
+            leaderboard.Add(record);
+            leaderboard = leaderboard
+                .OrderByDescending(entry => entry.score)
+                .ThenByDescending(entry => entry.completed)
+                .ThenByDescending(entry => entry.timeTicks)
+                .Take(10)
+                .ToList();
+            for (var i = 0; i < leaderboard.Count; i++)
+            {
+                leaderboard[i].rank = i + 1;
+            }
+
+            PlayerPrefs.SetString(LeaderboardPrefsKey, JsonUtility.ToJson(new RunLeaderboardData { records = leaderboard.ToArray() }));
+            PlayerPrefs.Save();
+            return leaderboard;
+        }
+
+        private List<RunLeaderboardRecord> LoadLeaderboard()
+        {
+            var json = PlayerPrefs.GetString(LeaderboardPrefsKey, string.Empty);
+            if (string.IsNullOrEmpty(json))
+            {
+                return new List<RunLeaderboardRecord>();
+            }
+
+            try
+            {
+                var data = JsonUtility.FromJson<RunLeaderboardData>(json);
+                return data?.records?.ToList() ?? new List<RunLeaderboardRecord>();
+            }
+            catch (Exception)
+            {
+                return new List<RunLeaderboardRecord>();
+            }
+        }
+
+        private string FormatLevelRemainingMoves(bool success, int reachedRoom)
+        {
+            var lines = new List<string> { "每关剩余步数：" };
+            for (var i = 0; i < levelRemainingMoves.Count; i++)
+            {
+                lines.Add($"第{i + 1}关：剩余{levelRemainingMoves[i]}步");
+            }
+
+            if (!success)
+            {
+                lines.Add($"第{reachedRoom}关：失败");
+            }
+
+            return string.Join("\n", lines);
+        }
+
+        private string FormatSkillNamesForSummary()
+        {
+            if (activeUpgrades.Count == 0)
+            {
+                return "- 无";
+            }
+
+            return string.Join("\n", activeUpgrades.Select(upgrade => $"- {upgrade.Name}"));
+        }
+
+        private string FormatSkillNamesInline()
+        {
+            return activeUpgrades.Count == 0 ? "无" : string.Join("、", activeUpgrades.Select(upgrade => upgrade.Name));
+        }
+
+        private string FormatRunStats(RunLeaderboardRecord record)
+        {
+            var lines = new List<string>
+            {
+                $"- 触发火箭：{record.rocketTriggerCount}次",
+                $"- 触发炸弹：{record.bombTriggerCount}次",
+                $"- 触发彩虹球：{record.rainbowTriggerCount}次",
+                $"- 触发螺旋桨：{record.propellerTriggerCount}次",
+                $"- 清除木箱：{record.clearedBoxCount}个",
+                $"- 木箱总伤害：{record.boxDamageTotal}",
+                $"- 最大单次清除：{record.maxSingleClearCount}",
+                $"- 最高连锁：{record.maxComboCount}",
+                $"- 使用步数：{record.totalMovesUsed}"
+            };
+            return string.Join("\n", lines);
+        }
+
+        private string FormatLeaderboard(List<RunLeaderboardRecord> leaderboard, int currentRecordId)
+        {
+            if (leaderboard.Count == 0)
+            {
+                return "暂无记录";
+            }
+
+            return string.Join("\n", leaderboard.Select((entry, index) =>
+            {
+                var marker = entry.id == currentRecordId ? "（本次）" : string.Empty;
+                return $"第{index + 1}名｜{entry.score}分｜{FormatLeaderboardTime(entry.timeTicks)}{marker}";
+            }));
+        }
+
+        private string FormatLeaderboardTime(long ticks)
+        {
+            return new DateTime(ticks).ToString("yyyy-MM-dd HH:mm");
         }
 
         private string FormatActiveUpgrades()
@@ -4192,6 +4421,35 @@ namespace MatchRogue
             public string Description { get; }
             public int MaxLevel { get; }
             public bool IsCore { get; }
+        }
+
+        [Serializable]
+        private sealed class RunLeaderboardData
+        {
+            public RunLeaderboardRecord[] records = Array.Empty<RunLeaderboardRecord>();
+        }
+
+        [Serializable]
+        private sealed class RunLeaderboardRecord
+        {
+            public int id;
+            public int rank;
+            public int score;
+            public long timeTicks;
+            public bool completed;
+            public int reachedLevel;
+            public int durationSeconds;
+            public string[] skillNames = Array.Empty<string>();
+            public int[] levelRemainingMoves = Array.Empty<int>();
+            public int rocketTriggerCount;
+            public int bombTriggerCount;
+            public int rainbowTriggerCount;
+            public int propellerTriggerCount;
+            public int clearedBoxCount;
+            public int boxDamageTotal;
+            public int maxSingleClearCount;
+            public int maxComboCount;
+            public int totalMovesUsed;
         }
 
         private enum UpgradeRarity
