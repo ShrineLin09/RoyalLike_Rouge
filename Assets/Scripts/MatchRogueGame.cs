@@ -1475,6 +1475,8 @@ namespace MatchRogue
             else if (targetSpecial == SpecialKind.Propeller)
             {
                 propellerActivationCount += positions.Count;
+                ResolveRainbowPropellerCombination(positions, clearSet);
+                return;
             }
 
             foreach (var pos in positions)
@@ -1505,6 +1507,27 @@ namespace MatchRogue
                 {
                     clearSet.Add(pos);
                 }
+            }
+
+            AwardScoreForClears(clearSet.Count);
+            ResolveClearSet(clearSet, null, false);
+        }
+
+        private void ResolveRainbowPropellerCombination(List<Vector2Int> propellerPositions, HashSet<Vector2Int> clearSet)
+        {
+            var reservedTargets = new HashSet<Vector2Int>(clearSet);
+            foreach (var pos in propellerPositions)
+            {
+                if (!IsInside(pos) || board[pos.x, pos.y] == null)
+                {
+                    continue;
+                }
+
+                clearSet.Add(pos);
+                reservedTargets.Add(pos);
+                var target = GetSmartPropellerTarget(PropellerTargetMode.Single, reservedTargets);
+                reservedTargets.Add(target);
+                clearSet.Add(target);
             }
 
             AwardScoreForClears(clearSet.Count);
