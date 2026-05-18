@@ -1466,7 +1466,7 @@ namespace MatchRogue
                 rainbowActivationCount += 2;
                 AddEntireBoard(clearSet);
                 AwardScoreForClears(clearSet.Count);
-                ResolveClearSet(clearSet, null, false);
+                ResolveClearSet(clearSet, null, false, 2);
                 return;
             }
 
@@ -1497,7 +1497,7 @@ namespace MatchRogue
                 AddRow(b.y, clearSet);
                 AddColumn(b.x, clearSet);
                 AwardScoreForClears(clearSet.Count);
-                ResolveClearSet(clearSet, null, false);
+                ResolveClearSet(clearSet, null, false, 2);
                 return;
             }
 
@@ -1506,7 +1506,7 @@ namespace MatchRogue
                 bombActivationCount += 2;
                 AddRadius(b, 3, clearSet);
                 AwardScoreForClears(clearSet.Count);
-                ResolveClearSet(clearSet, null, false);
+                ResolveClearSet(clearSet, null, false, 2);
                 return;
             }
 
@@ -1516,7 +1516,7 @@ namespace MatchRogue
                 bombActivationCount++;
                 AddStrongRocketBombClear(b, clearSet);
                 AwardScoreForClears(clearSet.Count);
-                ResolveClearSet(clearSet, null, false);
+                ResolveClearSet(clearSet, null, false, 2);
                 return;
             }
 
@@ -1555,6 +1555,7 @@ namespace MatchRogue
             var target = GetSmartPropellerTarget(mode, reservedTargets);
             reservedTargets.Add(target);
             AddCross(propellerPos, clearSet);
+            AddPropellerBoostArea(propellerPos, GetUpgradeLevel(UpgradeKind.PropellerBoost), clearSet);
 
             if (partnerSpecial == SpecialKind.Bomb)
             {
@@ -1581,7 +1582,8 @@ namespace MatchRogue
             else if (partnerSpecial == SpecialKind.Propeller)
             {
                 propellerActivationCount++;
-                for (var i = 0; i < 3; i++)
+                var targetCount = HasUpgrade(UpgradeKind.PropellerCore) ? 4 : 3;
+                for (var i = 0; i < targetCount; i++)
                 {
                     var multiTarget = GetSmartPropellerTarget(PropellerTargetMode.Multi, reservedTargets);
                     reservedTargets.Add(multiTarget);
@@ -1594,7 +1596,7 @@ namespace MatchRogue
             }
 
             AwardScoreForClears(clearSet.Count);
-            ResolveClearSet(clearSet, null, false);
+            ResolveClearSet(clearSet, null, false, 2);
         }
 
         private void ResolveRainbowSpecialCombination(SpecialKind targetSpecial, HashSet<Vector2Int> clearSet)
@@ -1659,7 +1661,7 @@ namespace MatchRogue
             }
 
             AwardScoreForClears(clearSet.Count);
-            ResolveClearSet(clearSet, null, false);
+            ResolveClearSet(clearSet, null, false, 2);
         }
 
         private void ResolveRainbowPropellerCombination(List<Vector2Int> propellerPositions, HashSet<Vector2Int> clearSet)
@@ -1680,7 +1682,7 @@ namespace MatchRogue
             }
 
             AwardScoreForClears(clearSet.Count);
-            ResolveClearSet(clearSet, null, false);
+            ResolveClearSet(clearSet, null, false, 2);
         }
 
         private PropellerTargetMode GetPropellerTargetMode(SpecialKind partnerSpecial)
@@ -2475,12 +2477,12 @@ namespace MatchRogue
             maxSingleClearCount = Mathf.Max(maxSingleClearCount, clearCount);
         }
 
-        private void ResolveClearSet(HashSet<Vector2Int> baseClears, PendingSpecial? specialToCreate, bool expandSpecials = true)
+        private void ResolveClearSet(HashSet<Vector2Int> baseClears, PendingSpecial? specialToCreate, bool expandSpecials = true, int initialTriggeredSpecialCount = 0)
         {
-            StartCoroutine(ResolveClearSetRoutine(baseClears, specialToCreate, expandSpecials));
+            StartCoroutine(ResolveClearSetRoutine(baseClears, specialToCreate, expandSpecials, initialTriggeredSpecialCount));
         }
 
-        private IEnumerator ResolveClearSetRoutine(HashSet<Vector2Int> baseClears, PendingSpecial? specialToCreate, bool expandSpecials = true)
+        private IEnumerator ResolveClearSetRoutine(HashSet<Vector2Int> baseClears, PendingSpecial? specialToCreate, bool expandSpecials = true, int initialTriggeredSpecialCount = 0)
         {
             var currentClears = baseClears;
             var currentSpecial = specialToCreate;
@@ -2491,9 +2493,11 @@ namespace MatchRogue
                 yield return new WaitForSeconds(MatchPauseSeconds);
 
                 var bonusClears = new HashSet<Vector2Int>(currentClears);
+                var triggeredSpecialCount = initialTriggeredSpecialCount;
+                initialTriggeredSpecialCount = 0;
                 if (currentExpandSpecials)
                 {
-                    ExpandSpecialClears(currentClears, bonusClears);
+                    triggeredSpecialCount += ExpandSpecialClears(currentClears, bonusClears);
                 }
 
                 if (currentSpecial.HasValue)
@@ -2518,7 +2522,7 @@ namespace MatchRogue
 
                 pendingPostClearSpecials.Clear();
 
-                ApplyPostClearUpgradeSpawns(normalClearedCount);
+                ApplyPostClearUpgradeSpawns(normalClearedCount, triggeredSpecialCount);
 
                 var fallMoves = ApplyGravity();
                 var spawnMoves = RefillBoard();
@@ -2881,15 +2885,15 @@ namespace MatchRogue
             return clearedPositions.Count(pos => IsInside(pos) && IsColorTile(board[pos.x, pos.y]));
         }
 
-        private void ApplyPostClearUpgradeSpawns(int normalClearedCount)
+        private void ApplyPostClearUpgradeSpawns(int normalClearedCount, int triggeredSpecialCount)
         {
             TryCreateSpecialByClearProgress(UpgradeKind.ExplosionCore, ref bombCoreClearProgress, normalClearedCount, 10, 10, 10, () => SpecialKind.Bomb);
             TryCreateSpecialByClearProgress(UpgradeKind.RocketCore, ref rocketCoreClearProgress, normalClearedCount, 7, 7, 7, RollRocketSpecial);
             TryCreateSpecialByClearProgress(UpgradeKind.RainbowCore, ref rainbowCoreClearProgress, normalClearedCount, 15, 15, 15, () => SpecialKind.Rainbow);
-            TryCreateSpecialByClearProgress(UpgradeKind.BombSpawn, ref bombSpawnClearProgress, normalClearedCount, 18, 16, 14, () => SpecialKind.Bomb);
-            TryCreateSpecialByClearProgress(UpgradeKind.RocketSpawn, ref rocketSpawnClearProgress, normalClearedCount, 16, 14, 12, RollRocketSpecial);
-            TryCreateSpecialByClearProgress(UpgradeKind.RainbowSpawn, ref rainbowSpawnClearProgress, normalClearedCount, 28, 24, 20, () => SpecialKind.Rainbow);
-            TryCreateSpecialByClearProgress(UpgradeKind.PropellerSpawn, ref propellerSpawnClearProgress, normalClearedCount, 14, 12, 10, () => SpecialKind.Propeller);
+            TryCreateSpecialByClearProgress(UpgradeKind.BombSpawn, ref bombSpawnClearProgress, triggeredSpecialCount, 18, 16, 14, () => SpecialKind.Bomb);
+            TryCreateSpecialByClearProgress(UpgradeKind.RocketSpawn, ref rocketSpawnClearProgress, triggeredSpecialCount, 16, 14, 12, RollRocketSpecial);
+            TryCreateSpecialByClearProgress(UpgradeKind.RainbowSpawn, ref rainbowSpawnClearProgress, triggeredSpecialCount, 28, 24, 20, () => SpecialKind.Rainbow);
+            TryCreateSpecialByClearProgress(UpgradeKind.PropellerSpawn, ref propellerSpawnClearProgress, triggeredSpecialCount, 14, 12, 10, () => SpecialKind.Propeller);
             TryCreateSpecialByClearProgress(UpgradeKind.PropellerRebirth, ref propellerRebirthMatchProgress, normalClearedCount, 5, 5, 5, () => SpecialKind.Propeller);
         }
 
@@ -3030,7 +3034,7 @@ namespace MatchRogue
             return level == 1 ? levelOneCount : levelTwoCount;
         }
 
-        private void ExpandSpecialClears(HashSet<Vector2Int> baseClears, HashSet<Vector2Int> output)
+        private int ExpandSpecialClears(HashSet<Vector2Int> baseClears, HashSet<Vector2Int> output)
         {
             var expandedSpecials = new HashSet<Vector2Int>();
             var queuedSpecials = new HashSet<Vector2Int>();
@@ -3079,6 +3083,8 @@ namespace MatchRogue
                     QueueSpecialExpansion(next, expandedSpecials, queuedSpecials, queue);
                 }
             }
+
+            return expandedSpecials.Count;
         }
 
         private void QueueSpecialExpansion(Vector2Int pos, HashSet<Vector2Int> expandedSpecials, HashSet<Vector2Int> queuedSpecials, Queue<Vector2Int> queue)
@@ -3159,6 +3165,7 @@ namespace MatchRogue
             var target = GetSmartPropellerTarget(PropellerTargetMode.Single, reservedTargets);
             reservedTargets.Add(target);
             AddCross(pos, output);
+            AddPropellerBoostArea(pos, GetUpgradeLevel(UpgradeKind.PropellerBoost), output);
             output.Add(target);
             if (HasUpgrade(UpgradeKind.PropellerCore))
             {
@@ -3170,7 +3177,6 @@ namespace MatchRogue
             if (GetUpgradeLevel(UpgradeKind.PropellerBoost) > 0)
             {
                 ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.PropellerBoost));
-                AddPropellerBoostArea(target, GetUpgradeLevel(UpgradeKind.PropellerBoost), output);
             }
 
             RegisterCrateDamageBonus(output, GetUpgradeLevel(UpgradeKind.PropellerDamage));
@@ -3178,6 +3184,11 @@ namespace MatchRogue
 
         private void AddPropellerBoostArea(Vector2Int center, int level, HashSet<Vector2Int> output)
         {
+            if (level <= 0)
+            {
+                return;
+            }
+
             var reach = Mathf.Clamp(level + 1, 2, 3);
             output.Add(center);
             for (var offset = 1; offset <= reach; offset++)
@@ -3695,7 +3706,7 @@ namespace MatchRogue
                 case UpgradeKind.BombDamage:
                     return $"炸弹触发时，对障碍物的伤害+{nextLevel}。";
                 case UpgradeKind.BombSpawn:
-                    return $"累计消除{GetLevelValue(nextLevel, 18, 16, 14)}个普通棋子后生成炸弹。";
+                    return $"累计触发{GetLevelValue(nextLevel, 18, 16, 14)}个特效后生成炸弹。";
                 case UpgradeKind.BombReserve:
                     return $"每关开始时额外生成{GetLevelValue(nextLevel, 2, 4, 4)}个炸弹。";
                 case UpgradeKind.RocketReserve:
@@ -3703,15 +3714,15 @@ namespace MatchRogue
                 case UpgradeKind.RocketDamage:
                     return $"火箭触发时，对障碍物的伤害+{nextLevel}。";
                 case UpgradeKind.RocketSpawn:
-                    return $"累计消除{GetLevelValue(nextLevel, 16, 14, 12)}个普通棋子后生成火箭。";
+                    return $"累计触发{GetLevelValue(nextLevel, 16, 14, 12)}个特效后生成火箭。";
                 case UpgradeKind.RainbowSpawn:
-                    return $"累计消除{GetLevelValue(nextLevel, 28, 24, 20)}个普通棋子后生成彩球。";
+                    return $"累计触发{GetLevelValue(nextLevel, 28, 24, 20)}个特效后生成彩球。";
                 case UpgradeKind.RainbowReserve:
                     return $"每关开始时额外生成{GetLevelValue(nextLevel, 1, 2, 2)}个彩球。";
                 case UpgradeKind.RainbowMutation:
                     return $"彩球触发后，被消除的方块处有{GetLevelValue(nextLevel, 15, 30, 50)}%概率生成螺旋桨。";
                 case UpgradeKind.PropellerSpawn:
-                    return $"累计消除{GetLevelValue(nextLevel, 14, 12, 10)}个普通棋子后生成螺旋桨。";
+                    return $"累计触发{GetLevelValue(nextLevel, 14, 12, 10)}个特效后生成螺旋桨。";
                 case UpgradeKind.PropellerReserve:
                     return $"每关开始时额外生成{GetLevelValue(nextLevel, 4, 6, 6)}个螺旋桨。";
                 case UpgradeKind.PropellerDamage:
@@ -4153,25 +4164,25 @@ namespace MatchRogue
             {
                 new RogueUpgrade(UpgradeKind.ExplosionCore, UpgradeFaction.Explosion, UpgradeRarity.Common, "爆破核心", "每累计完成10次普通消除，生成1个炸弹；每关开始生成2个炸弹。", 1, true),
                 new RogueUpgrade(UpgradeKind.BombDamage, UpgradeFaction.Explosion, UpgradeRarity.Common, "炸弹扩容", "炸弹触发时，对障碍物的伤害+1/2。", 2, false),
-                new RogueUpgrade(UpgradeKind.BombSpawn, UpgradeFaction.Explosion, UpgradeRarity.Common, "越炸越多", "累计消除18/16/14个普通棋子后生成炸弹。", 3, false),
+                new RogueUpgrade(UpgradeKind.BombSpawn, UpgradeFaction.Explosion, UpgradeRarity.Common, "越炸越多", "累计触发18/16/14个特效后生成炸弹。", 3, false),
                 new RogueUpgrade(UpgradeKind.BombReserve, UpgradeFaction.Explosion, UpgradeRarity.Rare, "炸弹储备", "每关开始时额外生成2/4个炸弹。", 2, false),
                 new RogueUpgrade(UpgradeKind.ExplosionAftershock, UpgradeFaction.Explosion, UpgradeRarity.Rare, "爆炸余波", "炸弹被手动触发后，在触发处留下一个火箭。", 1, false),
 
                 new RogueUpgrade(UpgradeKind.RocketCore, UpgradeFaction.Rocket, UpgradeRarity.Common, "火箭核心", "每累计完成7次普通消除，生成1个火箭；每关开始生成3个火箭。", 1, true),
                 new RogueUpgrade(UpgradeKind.RocketReserve, UpgradeFaction.Rocket, UpgradeRarity.Common, "火箭储备", "每关开始时额外生成3/5个火箭。", 2, false),
                 new RogueUpgrade(UpgradeKind.RocketDamage, UpgradeFaction.Rocket, UpgradeRarity.Common, "火箭扩容", "火箭触发时，对障碍物的伤害+1/2。", 2, false),
-                new RogueUpgrade(UpgradeKind.RocketSpawn, UpgradeFaction.Rocket, UpgradeRarity.Common, "火箭补给", "累计消除16/14/12个普通棋子后生成火箭。", 3, false),
+                new RogueUpgrade(UpgradeKind.RocketSpawn, UpgradeFaction.Rocket, UpgradeRarity.Common, "火箭补给", "累计触发16/14/12个特效后生成火箭。", 3, false),
                 new RogueUpgrade(UpgradeKind.RocketAftershock, UpgradeFaction.Rocket, UpgradeRarity.Common, "火箭余波", "火箭被手动触发后，在触发处留下一个螺旋桨。", 1, false),
                 new RogueUpgrade(UpgradeKind.RocketSplit, UpgradeFaction.Rocket, UpgradeRarity.Epic, "火箭分裂", "火箭范围加宽1格。", 1, false),
 
                 new RogueUpgrade(UpgradeKind.RainbowCore, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩虹核心", "每累计完成15次普通消除，生成1个彩球；每关开始生成1个彩球。", 1, true),
-                new RogueUpgrade(UpgradeKind.RainbowSpawn, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩虹凝结", "累计消除28/24/20个普通棋子后生成彩球。", 3, false),
+                new RogueUpgrade(UpgradeKind.RainbowSpawn, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩虹凝结", "累计触发28/24/20个特效后生成彩球。", 3, false),
                 new RogueUpgrade(UpgradeKind.RainbowAftershock, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩虹余波", "彩球被手动触发后，在触发处留下一个炸弹。", 1, false),
                 new RogueUpgrade(UpgradeKind.RainbowReserve, UpgradeFaction.Rainbow, UpgradeRarity.Epic, "彩虹储备", "每关开始时额外生成1/2个彩球。", 2, false),
                 new RogueUpgrade(UpgradeKind.RainbowMutation, UpgradeFaction.Rainbow, UpgradeRarity.Epic, "彩虹异变", "彩球触发后，被消除的方块处有15%/30%/50%概率生成螺旋桨。", 3, false),
 
                 new RogueUpgrade(UpgradeKind.PropellerCore, UpgradeFaction.Propeller, UpgradeRarity.Common, "螺旋核心", "单个螺旋桨额外锁定1个目标；每关开始生成4个螺旋桨。", 1, true),
-                new RogueUpgrade(UpgradeKind.PropellerSpawn, UpgradeFaction.Propeller, UpgradeRarity.Common, "起飞补给", "累计消除14/12/10个普通棋子后生成螺旋桨。", 3, false),
+                new RogueUpgrade(UpgradeKind.PropellerSpawn, UpgradeFaction.Propeller, UpgradeRarity.Common, "起飞补给", "累计触发14/12/10个特效后生成螺旋桨。", 3, false),
                 new RogueUpgrade(UpgradeKind.PropellerReserve, UpgradeFaction.Propeller, UpgradeRarity.Common, "螺旋储备", "每关开始时额外生成4/6个螺旋桨。", 2, false),
                 new RogueUpgrade(UpgradeKind.PropellerDamage, UpgradeFaction.Propeller, UpgradeRarity.Common, "螺旋扩容", "螺旋桨触发时，对障碍物的伤害+1/2。", 2, false),
                 new RogueUpgrade(UpgradeKind.PropellerBoost, UpgradeFaction.Propeller, UpgradeRarity.Common, "螺旋增压", "螺旋桨原地爆炸时的范围扩大为横纵方向的2/3格。", 2, false),
