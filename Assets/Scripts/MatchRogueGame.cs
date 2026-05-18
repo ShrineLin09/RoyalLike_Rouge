@@ -425,9 +425,10 @@ namespace MatchRogue
             upgradeRefreshButtons = new Button[3];
             for (var i = 0; i < upgradeButtons.Length; i++)
             {
-                upgradeButtons[i] = CreateButton($"Upgrade {i + 1}", new Vector2(0f, 120f - i * 140f), new Vector2(860f, 108f));
-                upgradeRefreshButtons[i] = CreateButton($"Upgrade Refresh {i + 1}", new Vector2(0f, 57f - i * 140f), new Vector2(300f, 42f));
-                upgradeRefreshButtons[i].GetComponentInChildren<Text>().fontSize = 22;
+                upgradeButtons[i] = CreateButton($"Upgrade {i + 1}", new Vector2(0f, 250f - i * 230f), new Vector2(980f, 158f));
+                upgradeButtons[i].GetComponentInChildren<Text>().fontSize = 34;
+                upgradeRefreshButtons[i] = CreateButton($"Upgrade Refresh {i + 1}", new Vector2(0f, 145f - i * 230f), new Vector2(360f, 56f));
+                upgradeRefreshButtons[i].GetComponentInChildren<Text>().fontSize = 26;
                 upgradeRefreshButtons[i].GetComponentInChildren<Text>().text = "广告刷新";
             }
 
@@ -2456,7 +2457,7 @@ namespace MatchRogue
             comboChain++;
 
             var matchedPositions = new HashSet<Vector2Int>(matchGroups.SelectMany(group => group.Positions));
-            var specialToCreate = DetermineSpecialKind(matchGroups, specialSpawn);
+            var specialToCreate = DetermineSpecialKind(matchGroups, specialSpawn, true);
             AwardScoreForClears(matchedPositions.Count);
 
             ResolveClearSet(matchedPositions, specialToCreate);
@@ -3373,7 +3374,7 @@ namespace MatchRogue
             return matchGroups.OrderByDescending(group => group.Positions.Count).First().Positions[0];
         }
 
-        private PendingSpecial? DetermineSpecialKind(List<MatchGroup> matchGroups, Vector2Int? spawnPosition)
+        private PendingSpecial? DetermineSpecialKind(List<MatchGroup> matchGroups, Vector2Int? spawnPosition, bool countOrdinaryTripleUpgrades = false)
         {
             if (matchGroups.Count == 0)
             {
@@ -3417,7 +3418,7 @@ namespace MatchRogue
                 return new PendingSpecial(position, specialKind);
             }
 
-            var ordinaryTripleCount = CountOrdinaryTripleMatchGroups(matchGroups);
+            var ordinaryTripleCount = countOrdinaryTripleUpgrades ? CountOrdinaryTripleMatchGroups(matchGroups) : 0;
             if (ordinaryTripleCount > 0)
             {
                 ApplyOrdinaryTripleUpgradeSpawns(ordinaryTripleCount);
@@ -4219,10 +4220,10 @@ namespace MatchRogue
 
         private void ConfigureUpgradeTextForChoices()
         {
-            upgradeText.fontSize = 40;
+            upgradeText.fontSize = 46;
             upgradeText.alignment = TextAnchor.MiddleCenter;
-            upgradeText.rectTransform.sizeDelta = new Vector2(1000f, 120f);
-            upgradeText.rectTransform.anchoredPosition = new Vector2(0f, -430f);
+            upgradeText.rectTransform.sizeDelta = new Vector2(1040f, 150f);
+            upgradeText.rectTransform.anchoredPosition = new Vector2(0f, -250f);
         }
 
         private void ConfigureUpgradeTextForSummary()
