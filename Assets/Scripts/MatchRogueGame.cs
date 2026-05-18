@@ -174,6 +174,7 @@ namespace MatchRogue
         private Text statusText;
         private Text upgradeText;
         private Text triggerText;
+        private Image summaryPanel;
         private RectTransform statusRect;
         private Button[] upgradeButtons;
         private Button[] upgradeRefreshButtons;
@@ -415,6 +416,9 @@ namespace MatchRogue
             statusRect.anchorMin = new Vector2(0f, 1f);
             statusRect.anchorMax = new Vector2(0f, 1f);
             statusRect.pivot = new Vector2(0f, 1f);
+            summaryPanel = CreatePanel("Run Summary Panel", new Vector2(0f, -540f), new Vector2(1040f, 1180f), new Color(0.06f, 0.07f, 0.10f, 0.94f));
+            summaryPanel.gameObject.SetActive(false);
+
             upgradeText = CreateText("UpgradeTitle", new Vector2(0f, -430f), new Vector2(1000f, 120f), 40, TextAnchor.MiddleCenter);
             upgradeText.text = "";
             triggerText = CreateText("TriggerText", new Vector2(0f, -315f), new Vector2(760f, 80f), 34, TextAnchor.MiddleCenter);
@@ -432,17 +436,17 @@ namespace MatchRogue
                 upgradeRefreshButtons[i].GetComponentInChildren<Text>().text = "广告刷新";
             }
 
-            extraSkillAdButton = CreateButton("Ad Extra Skill", new Vector2(-330f, -1730f), new Vector2(300f, 70f));
+            extraSkillAdButton = CreateButton("Ad Extra Skill", new Vector2(-330f, -870f), new Vector2(300f, 70f));
             extraSkillAdButton.GetComponentInChildren<Text>().fontSize = 24;
             extraSkillAdButton.GetComponentInChildren<Text>().text = "广告选技能";
             extraSkillAdButton.onClick.AddListener(OnExtraSkillAdClicked);
 
-            extraMovesAdButton = CreateButton("Ad Extra Moves", new Vector2(0f, -1730f), new Vector2(260f, 70f));
+            extraMovesAdButton = CreateButton("Ad Extra Moves", new Vector2(0f, -870f), new Vector2(260f, 70f));
             extraMovesAdButton.GetComponentInChildren<Text>().fontSize = 24;
             extraMovesAdButton.GetComponentInChildren<Text>().text = "广告+5步";
             extraMovesAdButton.onClick.AddListener(OnExtraMovesAdClicked);
 
-            shuffleAdButton = CreateButton("Ad Shuffle", new Vector2(310f, -1730f), new Vector2(260f, 70f));
+            shuffleAdButton = CreateButton("Ad Shuffle", new Vector2(310f, -870f), new Vector2(260f, 70f));
             shuffleAdButton.GetComponentInChildren<Text>().fontSize = 24;
             shuffleAdButton.GetComponentInChildren<Text>().text = "广告洗牌";
             shuffleAdButton.onClick.AddListener(OnShuffleAdClicked);
@@ -489,6 +493,22 @@ namespace MatchRogue
             text.horizontalOverflow = HorizontalWrapMode.Wrap;
             text.verticalOverflow = VerticalWrapMode.Overflow;
             return text;
+        }
+
+        private Image CreatePanel(string name, Vector2 anchoredPosition, Vector2 size, Color color)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(canvas.transform);
+            var rect = go.AddComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 1f);
+            rect.anchorMax = new Vector2(0.5f, 1f);
+            rect.pivot = new Vector2(0.5f, 1f);
+            rect.anchoredPosition = anchoredPosition;
+            rect.sizeDelta = size;
+
+            var image = go.AddComponent<Image>();
+            image.color = color;
+            return image;
         }
 
         private void AddTextOutline(Text text, Color color, Vector2 distance)
@@ -581,6 +601,7 @@ namespace MatchRogue
             restartButton.GetComponentInChildren<Text>().text = "重新开始";
             restartButton.gameObject.SetActive(true);
             endlessButton.gameObject.SetActive(false);
+            summaryPanel.gameObject.SetActive(false);
             RefreshAdButtons();
             ShowUpgradeChoices(0, true);
         }
@@ -3614,6 +3635,7 @@ namespace MatchRogue
 
         private void ShowUpgradeChoices(int completedRoom, bool startsRoomAfterSelection)
         {
+            summaryPanel.gameObject.SetActive(false);
             currentUpgradeChoiceCompletedRoom = completedRoom;
             choiceStartsRoomAfterSelection = startsRoomAfterSelection;
             for (var i = 0; i < optionRefreshUsed.Length; i++)
@@ -4223,8 +4245,12 @@ namespace MatchRogue
             inputLocked = true;
             SetUpgradePanel(false);
             ConfigureUpgradeTextForSummary();
+            summaryPanel.gameObject.SetActive(true);
+            summaryPanel.transform.SetAsLastSibling();
+            upgradeText.transform.SetAsLastSibling();
             upgradeText.gameObject.SetActive(true);
             restartButton.gameObject.SetActive(true);
+            restartButton.transform.SetAsLastSibling();
             restartButton.GetComponentInChildren<Text>().text = "再来一局";
             endlessButton.gameObject.SetActive(false);
             RefreshAdButtons();
@@ -4252,10 +4278,12 @@ namespace MatchRogue
 
         private void ConfigureUpgradeTextForSummary()
         {
+            summaryPanel.rectTransform.sizeDelta = new Vector2(1040f, 1220f);
+            summaryPanel.rectTransform.anchoredPosition = new Vector2(0f, -210f);
             upgradeText.fontSize = 24;
             upgradeText.alignment = TextAnchor.UpperCenter;
-            upgradeText.rectTransform.sizeDelta = new Vector2(1120f, 1180f);
-            upgradeText.rectTransform.anchoredPosition = new Vector2(0f, -185f);
+            upgradeText.rectTransform.sizeDelta = new Vector2(980f, 1120f);
+            upgradeText.rectTransform.anchoredPosition = new Vector2(0f, -245f);
         }
 
         private void RefreshStatus()
