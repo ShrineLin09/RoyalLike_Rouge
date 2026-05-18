@@ -176,6 +176,10 @@ namespace MatchRogue
         private Text triggerText;
         private RectTransform statusRect;
         private Button[] upgradeButtons;
+        private Button[] upgradeRefreshButtons;
+        private Button extraSkillAdButton;
+        private Button extraMovesAdButton;
+        private Button shuffleAdButton;
         private Button restartButton;
         private Button endlessButton;
         private Texture2D lineHorizontalIcon;
@@ -190,8 +194,15 @@ namespace MatchRogue
         private Vector2Int? selected;
         private bool inputLocked;
         private bool upgradePanelOpen;
+        private bool choiceStartsRoomAfterSelection;
+        private bool extraSkillAdUsedThisRun;
+        private bool extraMovesAdUsedThisLevel;
+        private bool shuffleAdUsedThisLevel;
+        private readonly bool[] optionRefreshUsed = new bool[3];
+        private readonly List<RogueUpgrade> currentUpgradeChoices = new List<RogueUpgrade>();
         private int room = 1;
         private int pendingRewardAfterRoom;
+        private int currentUpgradeChoiceCompletedRoom;
         private int score;
         private int runScore;
         private int baseTargetScore;
@@ -210,6 +221,9 @@ namespace MatchRogue
         private int boxDamageTotal;
         private int maxSingleClearCount;
         private int totalMovesUsed;
+        private int extraMovesAdUseCount;
+        private int shuffleAdUseCount;
+        private int skillRefreshAdUseCount;
         private int currentRunLeaderboardId;
         private DateTime runStartTime;
         private readonly List<int> levelRemainingMoves = new List<int>();
@@ -408,10 +422,29 @@ namespace MatchRogue
             triggerText.gameObject.SetActive(false);
 
             upgradeButtons = new Button[3];
+            upgradeRefreshButtons = new Button[3];
             for (var i = 0; i < upgradeButtons.Length; i++)
             {
                 upgradeButtons[i] = CreateButton($"Upgrade {i + 1}", new Vector2(0f, 120f - i * 140f), new Vector2(860f, 108f));
+                upgradeRefreshButtons[i] = CreateButton($"Upgrade Refresh {i + 1}", new Vector2(0f, 57f - i * 140f), new Vector2(300f, 42f));
+                upgradeRefreshButtons[i].GetComponentInChildren<Text>().fontSize = 22;
+                upgradeRefreshButtons[i].GetComponentInChildren<Text>().text = "广告刷新";
             }
+
+            extraSkillAdButton = CreateButton("Ad Extra Skill", new Vector2(-330f, -1730f), new Vector2(300f, 70f));
+            extraSkillAdButton.GetComponentInChildren<Text>().fontSize = 24;
+            extraSkillAdButton.GetComponentInChildren<Text>().text = "广告选技能";
+            extraSkillAdButton.onClick.AddListener(OnExtraSkillAdClicked);
+
+            extraMovesAdButton = CreateButton("Ad Extra Moves", new Vector2(0f, -1730f), new Vector2(260f, 70f));
+            extraMovesAdButton.GetComponentInChildren<Text>().fontSize = 24;
+            extraMovesAdButton.GetComponentInChildren<Text>().text = "广告+5步";
+            extraMovesAdButton.onClick.AddListener(OnExtraMovesAdClicked);
+
+            shuffleAdButton = CreateButton("Ad Shuffle", new Vector2(310f, -1730f), new Vector2(260f, 70f));
+            shuffleAdButton.GetComponentInChildren<Text>().fontSize = 24;
+            shuffleAdButton.GetComponentInChildren<Text>().text = "广告洗牌";
+            shuffleAdButton.onClick.AddListener(OnShuffleAdClicked);
 
             restartButton = CreateButton("Restart", new Vector2(0f, -790f), new Vector2(420f, 90f));
             restartButton.GetComponentInChildren<Text>().text = "重新开始";
@@ -513,6 +546,10 @@ namespace MatchRogue
             missedCoreFactionChoiceCounts.Clear();
             pendingPostClearSpecials.Clear();
             pendingRandomSpecialSpawns.Clear();
+            extraSkillAdUsedThisRun = false;
+            extraMovesAdUsedThisLevel = false;
+            shuffleAdUsedThisLevel = false;
+            currentUpgradeChoices.Clear();
             selected = null;
             inputLocked = false;
             score = 0;
@@ -526,6 +563,9 @@ namespace MatchRogue
             boxDamageTotal = 0;
             maxSingleClearCount = 0;
             totalMovesUsed = 0;
+            extraMovesAdUseCount = 0;
+            shuffleAdUseCount = 0;
+            skillRefreshAdUseCount = 0;
             currentRunLeaderboardId = 0;
             runStartTime = DateTime.Now;
             levelRemainingMoves.Clear();
@@ -541,12 +581,15 @@ namespace MatchRogue
             restartButton.GetComponentInChildren<Text>().text = "重新开始";
             restartButton.gameObject.SetActive(true);
             endlessButton.gameObject.SetActive(false);
-            ShowUpgradeChoices();
+            RefreshAdButtons();
+            ShowUpgradeChoices(0, true);
         }
 
         private void StartRoom()
         {
             inputLocked = false;
+            extraMovesAdUsedThisLevel = false;
+            shuffleAdUsedThisLevel = false;
             selected = null;
             GenerateBoard();
             PlaceRoomCrates();
@@ -564,6 +607,7 @@ namespace MatchRogue
             SetUpgradePanel(false);
             MarkEffectiveAction();
             RefreshStatus();
+            RefreshAdButtons();
         }
 
         private void GenerateBoard()
@@ -1213,6 +1257,91 @@ namespace MatchRogue
         {
             lastEffectiveActionTime = Time.unscaledTime;
             CancelHint();
+        }
+
+        private void ShowRewardedAd(Action onSuccess)
+        {
+            onSuccess?.Invoke();
+        }
+
+        private bool CanUseInLevelAd()
+        {
+            return !inputLocked &&
+                   !upgradePanelOpen &&
+                   remainingCrates > 0 &&
+                   movesRemaining > 0 &&
+                   board != null;
+        }
+
+        private void OnExtraSkillAdClicked()
+        {
+            if (extraSkillAdUsedThisRun || !CanUseInLevelAd())
+            {
+                return;
+            }
+
+            ShowRewardedAd(() =>
+            {
+                extraSkillAdUsedThisRun = true;
+                inputLocked = true;
+                ShowUpgradeChoices(Mathf.Clamp(room - 1, 0, RoomsPerRun - 1), false);
+            });
+        }
+
+        private void OnExtraMovesAdClicked()
+        {
+            if (extraMovesAdUsedThisLevel || !CanUseInLevelAd())
+            {
+                return;
+            }
+
+            ShowRewardedAd(() =>
+            {
+                extraMovesAdUsedThisLevel = true;
+                extraMovesAdUseCount++;
+                movesRemaining += 5;
+                RefreshStatus();
+                RefreshAdButtons();
+            });
+        }
+
+        private void OnShuffleAdClicked()
+        {
+            if (shuffleAdUsedThisLevel || !CanUseInLevelAd())
+            {
+                return;
+            }
+
+            ShowRewardedAd(() =>
+            {
+                shuffleAdUsedThisLevel = true;
+                shuffleAdUseCount++;
+                inputLocked = true;
+                RefreshAdButtons();
+                StartCoroutine(ShuffleMovableTilesByAdRoutine());
+            });
+        }
+
+        private IEnumerator ShuffleMovableTilesByAdRoutine()
+        {
+            ShowTriggerText("广告洗牌！", Color.white);
+            var moves = ShuffleMovableTiles();
+            RefreshBoardTransforms();
+            if (moves.Count > 0)
+            {
+                yield return AnimateFalls(moves);
+                yield return new WaitForSeconds(CascadePauseSeconds);
+            }
+
+            if (!HasAvailableMove())
+            {
+                yield return EnsurePlayableBoardRoutine();
+            }
+
+            inputLocked = false;
+            MarkEffectiveAction();
+            RefreshStatus();
+            RefreshAdButtons();
         }
 
         private void TrySwap(Vector2Int a, Vector2Int b)
@@ -2095,6 +2224,56 @@ namespace MatchRogue
                 for (var y = 0; y < Height; y++)
                 {
                     if (IsColorTile(board[x, y]))
+                    {
+                        positions.Add(new Vector2Int(x, y));
+                        tiles.Add(board[x, y]);
+                    }
+                }
+            }
+
+            if (positions.Count <= 1)
+            {
+                return new List<TileMove>();
+            }
+
+            var originalPositions = tiles.ToDictionary(tile => tile, tile => tile.Object.transform.position);
+            for (var attempts = 0; attempts < 20; attempts++)
+            {
+                var shuffledTiles = tiles.OrderBy(_ => rng.Next()).ToList();
+                for (var i = 0; i < positions.Count; i++)
+                {
+                    var pos = positions[i];
+                    board[pos.x, pos.y] = shuffledTiles[i];
+                }
+
+                if (HasAvailableMove() || attempts == 19)
+                {
+                    var moves = new List<TileMove>();
+                    foreach (var pos in positions)
+                    {
+                        var tile = board[pos.x, pos.y];
+                        var to = GridToWorld(pos.x, pos.y);
+                        var from = originalPositions[tile];
+                        tile.Object.transform.position = from;
+                        moves.Add(new TileMove(tile, from, to, Mathf.Max(1, Mathf.RoundToInt(Vector3.Distance(from, to)))));
+                    }
+
+                    return moves;
+                }
+            }
+
+            return new List<TileMove>();
+        }
+
+        private List<TileMove> ShuffleMovableTiles()
+        {
+            var positions = new List<Vector2Int>();
+            var tiles = new List<Tile>();
+            for (var x = 0; x < Width; x++)
+            {
+                for (var y = 0; y < Height; y++)
+                {
+                    if (IsMovableTile(board[x, y]))
                     {
                         positions.Add(new Vector2Int(x, y));
                         tiles.Add(board[x, y]);
@@ -3443,7 +3622,7 @@ namespace MatchRogue
 
             pendingRewardAfterRoom = room;
             room++;
-            ShowUpgradeChoices();
+            ShowUpgradeChoices(pendingRewardAfterRoom, true);
         }
 
         private void RecordCompletedRoomMoves()
@@ -3466,24 +3645,41 @@ namespace MatchRogue
             runScore = levelRemainingMoves.Sum();
         }
 
-        private void ShowUpgradeChoices()
+        private void ShowUpgradeChoices(int completedRoom, bool startsRoomAfterSelection)
         {
+            currentUpgradeChoiceCompletedRoom = completedRoom;
+            choiceStartsRoomAfterSelection = startsRoomAfterSelection;
+            for (var i = 0; i < optionRefreshUsed.Length; i++)
+            {
+                optionRefreshUsed[i] = false;
+            }
+
             ConfigureUpgradeTextForChoices();
-            upgradeText.text = pendingRewardAfterRoom <= 0
+            upgradeText.text = completedRoom <= 0
                 ? "开局选择\n选择一个技能进入第 1 关"
-                : $"第 {pendingRewardAfterRoom} 关完成\n选择一个技能进入第 {room} 关";
+                : startsRoomAfterSelection
+                    ? $"第 {completedRoom} 关完成\n选择一个技能进入第 {room} 关"
+                    : "广告额外选择\n选择一个技能后继续当前关";
 
             SetUpgradePanel(true);
-            var choices = RollUpgradeChoices(pendingRewardAfterRoom);
+            currentUpgradeChoices.Clear();
+            currentUpgradeChoices.AddRange(RollUpgradeChoices(completedRoom));
+            RefreshUpgradeChoiceButtons();
+            RefreshAdButtons();
+        }
+
+        private void RefreshUpgradeChoiceButtons()
+        {
             for (var i = 0; i < upgradeButtons.Length; i++)
             {
-                if (i >= choices.Length)
+                if (i >= currentUpgradeChoices.Count)
                 {
                     upgradeButtons[i].gameObject.SetActive(false);
+                    upgradeRefreshButtons[i].gameObject.SetActive(false);
                     continue;
                 }
 
-                var upgrade = choices[i];
+                var upgrade = currentUpgradeChoices[i];
                 var button = upgradeButtons[i];
                 button.gameObject.SetActive(true);
                 button.GetComponent<Image>().color = GetFactionColor(upgrade.Faction);
@@ -3492,8 +3688,25 @@ namespace MatchRogue
                 button.onClick.AddListener(() =>
                 {
                     ApplyUpgradeSelection(upgrade);
-                    StartRoom();
+                    SetUpgradePanel(false);
+                    RefreshAdButtons();
+                    if (choiceStartsRoomAfterSelection)
+                    {
+                        StartRoom();
+                    }
+                    else
+                    {
+                        inputLocked = false;
+                        RefreshStatus();
+                    }
                 });
+
+                var refreshButton = upgradeRefreshButtons[i];
+                refreshButton.gameObject.SetActive(!optionRefreshUsed[i]);
+                refreshButton.interactable = !optionRefreshUsed[i];
+                refreshButton.onClick.RemoveAllListeners();
+                var optionIndex = i;
+                refreshButton.onClick.AddListener(() => OnRefreshUpgradeOptionAdClicked(optionIndex));
             }
         }
 
@@ -3505,6 +3718,30 @@ namespace MatchRogue
                 removedTileTypes.Add(GetRemovedTileType(upgrade.Kind));
                 ClearRemovedColorTiles(GetRemovedTileType(upgrade.Kind));
             }
+        }
+
+        private void OnRefreshUpgradeOptionAdClicked(int optionIndex)
+        {
+            if (optionIndex < 0 || optionIndex >= currentUpgradeChoices.Count || optionRefreshUsed[optionIndex])
+            {
+                return;
+            }
+
+            ShowRewardedAd(() =>
+            {
+                var replacement = RollReplacementUpgradeChoice(optionIndex);
+                if (string.IsNullOrEmpty(replacement.Name))
+                {
+                    optionRefreshUsed[optionIndex] = true;
+                    RefreshUpgradeChoiceButtons();
+                    return;
+                }
+
+                currentUpgradeChoices[optionIndex] = replacement;
+                optionRefreshUsed[optionIndex] = true;
+                skillRefreshAdUseCount++;
+                RefreshUpgradeChoiceButtons();
+            });
         }
 
         private void ClearRemovedColorTiles(int tileType)
@@ -3536,11 +3773,7 @@ namespace MatchRogue
 
         private RogueUpgrade[] RollUpgradeChoices(int completedRoom)
         {
-            var pool = GetUpgradePool()
-                .Where(upgrade => GetUpgradeLevel(upgrade.Kind) < upgrade.MaxLevel)
-                .Where(upgrade => completedRoom != 0 || upgrade.Rarity != UpgradeRarity.Epic)
-                .Where(IsUpgradeUnlocked)
-                .ToList();
+            var pool = GetAvailableUpgradePool(completedRoom);
 
             var choices = new List<RogueUpgrade>();
             for (var i = 0; i < upgradeButtons.Length; i++)
@@ -3556,6 +3789,36 @@ namespace MatchRogue
             ApplyUpgradeChoiceGuarantees(completedRoom, pool, choices);
             UpdateCoreFactionChoiceMemory(choices);
             return choices.ToArray();
+        }
+
+        private RogueUpgrade RollReplacementUpgradeChoice(int optionIndex)
+        {
+            var pool = GetAvailableUpgradePool(currentUpgradeChoiceCompletedRoom);
+            var allCurrentChoices = currentUpgradeChoices.ToList();
+            var otherChoices = currentUpgradeChoices
+                .Where((_, index) => index != optionIndex)
+                .ToList();
+            var picked = PickUpgradeForRarity(pool, allCurrentChoices, RollChoiceRarity(currentUpgradeChoiceCompletedRoom));
+            if (string.IsNullOrEmpty(picked.Name))
+            {
+                picked = PickUpgradeForRarity(pool, otherChoices, RollChoiceRarity(currentUpgradeChoiceCompletedRoom));
+            }
+
+            if (string.IsNullOrEmpty(picked.Name))
+            {
+                picked = PickUpgradeForRarity(pool, new List<RogueUpgrade>(), RollChoiceRarity(currentUpgradeChoiceCompletedRoom));
+            }
+
+            return picked;
+        }
+
+        private List<RogueUpgrade> GetAvailableUpgradePool(int completedRoom)
+        {
+            return GetUpgradePool()
+                .Where(upgrade => GetUpgradeLevel(upgrade.Kind) < upgrade.MaxLevel)
+                .Where(upgrade => completedRoom != 0 || upgrade.Rarity != UpgradeRarity.Epic)
+                .Where(IsUpgradeUnlocked)
+                .ToList();
         }
 
         private UpgradeRarity RollChoiceRarity(int completedRoom)
@@ -3917,10 +4180,16 @@ namespace MatchRogue
             {
                 button.gameObject.SetActive(visible);
             }
+
+            foreach (var button in upgradeRefreshButtons)
+            {
+                button.gameObject.SetActive(visible);
+            }
         }
 
         private void FailRun()
         {
+            RefreshAdButtons();
             ShowRunSummary(false, room);
         }
 
@@ -3933,6 +4202,7 @@ namespace MatchRogue
             restartButton.gameObject.SetActive(true);
             restartButton.GetComponentInChildren<Text>().text = "再来一局";
             endlessButton.gameObject.SetActive(false);
+            RefreshAdButtons();
 
             var completedRooms = success ? RoomsPerRun : Mathf.Max(0, reachedRoom - 1);
             var record = CreateRunRecord(success, reachedRoom, completedRooms);
@@ -3974,6 +4244,24 @@ namespace MatchRogue
                 $"Run总分 {runScore} / 最高连锁 {Mathf.Max(1, bestComboChain)}\n" +
                 $"已选强化：{FormatSkillNamesInline()}\n" +
                 GetRoomGoalText();
+            RefreshAdButtons();
+        }
+
+        private void RefreshAdButtons()
+        {
+            if (extraSkillAdButton == null || extraMovesAdButton == null || shuffleAdButton == null)
+            {
+                return;
+            }
+
+            var canUse = CanUseInLevelAd();
+            var visible = !upgradePanelOpen && remainingCrates > 0;
+            extraSkillAdButton.gameObject.SetActive(visible && !extraSkillAdUsedThisRun);
+            extraSkillAdButton.interactable = canUse && !extraSkillAdUsedThisRun;
+            extraMovesAdButton.gameObject.SetActive(visible && !extraMovesAdUsedThisLevel);
+            extraMovesAdButton.interactable = canUse && !extraMovesAdUsedThisLevel;
+            shuffleAdButton.gameObject.SetActive(visible && !shuffleAdUsedThisLevel);
+            shuffleAdButton.interactable = canUse && !shuffleAdUsedThisLevel;
         }
 
         private RunLeaderboardRecord CreateRunRecord(bool success, int reachedRoom, int completedRooms)
@@ -3998,7 +4286,11 @@ namespace MatchRogue
                 boxDamageTotal = boxDamageTotal,
                 maxSingleClearCount = maxSingleClearCount,
                 maxComboCount = bestComboChain,
-                totalMovesUsed = totalMovesUsed
+                totalMovesUsed = totalMovesUsed,
+                usedExtraSkillAd = extraSkillAdUsedThisRun,
+                extraMovesAdUseCount = extraMovesAdUseCount,
+                shuffleAdUseCount = shuffleAdUseCount,
+                skillRefreshAdUseCount = skillRefreshAdUseCount
             };
         }
 
@@ -4382,6 +4674,11 @@ namespace MatchRogue
             return tile != null && tile.Special == SpecialKind.None && tile.CrateHealth <= 0;
         }
 
+        private bool IsMovableTile(Tile tile)
+        {
+            return tile != null && tile.CrateHealth <= 0;
+        }
+
         private bool IsRocket(SpecialKind special)
         {
             return special == SpecialKind.LineHorizontal || special == SpecialKind.LineVertical;
@@ -4523,6 +4820,10 @@ namespace MatchRogue
             public int maxSingleClearCount;
             public int maxComboCount;
             public int totalMovesUsed;
+            public bool usedExtraSkillAd;
+            public int extraMovesAdUseCount;
+            public int shuffleAdUseCount;
+            public int skillRefreshAdUseCount;
         }
 
         private enum UpgradeRarity
