@@ -25,6 +25,7 @@ namespace MatchRogue
         private const float StrongHintDelaySeconds = 12f;
         private const int RoomsPerRun = 6;
         private const string LeaderboardPrefsKey = "MatchRogue.RunLeaderboard.v1";
+        private const string LevelConfigResourcePattern = "Configs/Levels/Level_{0:00}";
 
         private static readonly int[] RoomMoveLimits = { 32, 32, 34, 34, 36, 42 };
         private static readonly int[] RoomTargetScores = { 14000, 22000, 34000, 50000, 70000, 95000 };
@@ -160,6 +161,8 @@ namespace MatchRogue
         };
 
         private Tile[,] board;
+        private int[,] iceHealth;
+        private GameObject[,] iceOverlays;
         private readonly List<RogueUpgrade> activeUpgrades = new List<RogueUpgrade>();
         private readonly HashSet<int> removedTileTypes = new HashSet<int>();
         private readonly Dictionary<Vector2Int, int> crateDamageBonuses = new Dictionary<Vector2Int, int>();
@@ -211,8 +214,11 @@ namespace MatchRogue
         private int targetScore;
         private int totalCrates;
         private int remainingCrates;
+        private int totalIce;
+        private int remainingIce;
         private int movesRemaining;
         private int roomMoveLimit;
+        private int currentColorCount = TileTypes;
         private int comboChain;
         private int bestComboChain;
         private int rocketActivationCount;
@@ -221,6 +227,8 @@ namespace MatchRogue
         private int propellerActivationCount;
         private int clearedBoxCount;
         private int boxDamageTotal;
+        private int clearedIceCount;
+        private int iceDamageTotal;
         private int maxSingleClearCount;
         private int totalMovesUsed;
         private int extraMovesAdUseCount;
@@ -262,6 +270,8 @@ namespace MatchRogue
             boardWidth = Mathf.Clamp(boardWidth, 6, 12);
             boardHeight = Mathf.Clamp(boardHeight, 6, 14);
             board = new Tile[Width, Height];
+            iceHealth = new int[Width, Height];
+            iceOverlays = new GameObject[Width, Height];
             BuildScene();
             StartRun();
         }
@@ -581,6 +591,8 @@ namespace MatchRogue
             propellerActivationCount = 0;
             clearedBoxCount = 0;
             boxDamageTotal = 0;
+            clearedIceCount = 0;
+            iceDamageTotal = 0;
             maxSingleClearCount = 0;
             totalMovesUsed = 0;
             extraMovesAdUseCount = 0;
@@ -612,16 +624,17 @@ namespace MatchRogue
             extraMovesAdUsedThisLevel = false;
             shuffleAdUsedThisLevel = false;
             selected = null;
+            var roomIndex = Mathf.Clamp(room - 1, 0, RoomsPerRun - 1);
+            var levelConfig = GetLevelConfig(room);
+            roomMoveLimit = levelConfig?.MoveLimit ?? RoomMoveLimits[roomIndex];
+            currentColorCount = Mathf.Clamp(levelConfig?.ColorCount ?? TileTypes, 3, TileTypes);
             GenerateBoard();
-            PlaceRoomCrates();
+            PlaceRoomTargets(levelConfig);
             SeedShowcaseSpecialsForRoom();
             EnsurePlayableBoard();
             RefreshBoardTransforms();
             score = 0;
             comboChain = 0;
-            var roomIndex = Mathf.Clamp(room - 1, 0, RoomsPerRun - 1);
-            var levelConfig = GetLevelConfig(room);
-            roomMoveLimit = levelConfig?.MoveLimit ?? RoomMoveLimits[roomIndex];
             movesRemaining = roomMoveLimit;
             baseTargetScore = RoomTargetScores[roomIndex];
             targetScore = GetAdjustedTargetScore();
@@ -636,6 +649,9 @@ namespace MatchRogue
             ClearTiles();
             totalCrates = 0;
             remainingCrates = 0;
+            totalIce = 0;
+            remainingIce = 0;
+            Array.Clear(iceHealth, 0, iceHealth.Length);
 
             for (var x = 0; x < Width; x++)
             {
@@ -647,11 +663,10 @@ namespace MatchRogue
             }
         }
 
-        private void PlaceRoomCrates()
+        private void PlaceRoomTargets(LevelConfig levelConfig)
         {
             var roomIndex = Mathf.Clamp(room - 1, 0, RoomsPerRun - 1);
-            var levelConfig = GetLevelConfig(room);
-            if (levelConfig != null && TryPlaceConfiguredCrates(levelConfig))
+            if (levelConfig != null && TryPlaceConfiguredTargets(levelConfig))
             {
                 return;
             }
@@ -684,65 +699,232 @@ namespace MatchRogue
 
         private LevelConfig GetLevelConfig(int levelIndex)
         {
-            return LevelConfigs.FirstOrDefault(level => level.LevelIndex == levelIndex);
+            return LoadCsvLevelConfig(levelIndex) ?? LevelConfigs.FirstOrDefault(level => level.LevelIndex == levelIndex);
         }
 
-        private bool TryPlaceConfiguredCrates(LevelConfig config)
+        private bool TryPlaceConfiguredTargets(LevelConfig config)
         {
             if (config.BoardWidth != Width || config.BoardHeight != Height)
             {
-                Debug.LogWarning($"Level {config.LevelIndex} board size is {config.BoardWidth}x{config.BoardHeight}, current board is {Width}x{Height}. Out-of-range boxes will be skipped.");
+                Debug.LogWarning($"Level {config.LevelIndex} board size is {config.BoardWidth}x{config.BoardHeight}, current board is {Width}x{Height}. Out-of-range cells will be skipped.");
             }
 
             totalCrates = 0;
             remainingCrates = 0;
+            totalIce = 0;
+            remainingIce = 0;
+            Array.Clear(iceHealth, 0, iceHealth.Length);
 
-            for (var row = 0; row < config.BoxMapRows.Length; row++)
+            for (var row = 0; row < config.GridRows.Length; row++)
             {
-                var mapRow = config.BoxMapRows[row] ?? string.Empty;
-                if (mapRow.Length != config.BoardWidth)
+                var tokens = SplitCsvLine(config.GridRows[row] ?? string.Empty);
+                if (tokens.Length != config.BoardWidth)
                 {
-                    Debug.LogWarning($"Level {config.LevelIndex} row {row} has width {mapRow.Length}, expected {config.BoardWidth}.");
+                    Debug.LogWarning($"Level {config.LevelIndex} row {row} has width {tokens.Length}, expected {config.BoardWidth}.");
                 }
 
-                // Box maps are authored from top to bottom. Runtime grid coordinates use bottom-left origin:
-                // x increases left to right, y increases bottom to top.
+                // CSV grid rows are authored top to bottom: first row is the top of the board,
+                // last row is the bottom. Runtime grid coordinates use a bottom-left origin.
                 var y = Height - 1 - row;
-                for (var x = 0; x < mapRow.Length; x++)
+                for (var x = 0; x < Mathf.Min(tokens.Length, config.BoardWidth); x++)
                 {
-                    var hp = mapRow[x] - '0';
-                    if (mapRow[x] == '.')
-                    {
-                        continue;
-                    }
-
-                    if (hp < 1 || hp > 3)
-                    {
-                        Debug.LogWarning($"Level {config.LevelIndex} has invalid box token '{mapRow[x]}' at map row {row}, x {x}. Use '.', '1', '2', or '3'.");
-                        continue;
-                    }
-
                     var pos = new Vector2Int(x, y);
                     if (!IsInside(pos))
                     {
-                        Debug.LogWarning($"Level {config.LevelIndex} box ({x},{y}) is outside the {Width}x{Height} board and was skipped.");
+                        Debug.LogWarning($"Level {config.LevelIndex} cell ({x},{y}) is outside the {Width}x{Height} board and was skipped.");
                         continue;
                     }
 
-                    board[pos.x, pos.y].CrateHealth = hp;
-                    DecorateTile(board[pos.x, pos.y]);
-                    totalCrates++;
+                    var cell = ParseLevelCellToken(config.LevelIndex, row, x, tokens[x]);
+                    ApplyLevelCell(pos, cell);
                 }
             }
 
             remainingCrates = totalCrates;
-            if (totalCrates <= 0)
+            remainingIce = totalIce;
+            RefreshAllIceOverlays();
+            if (totalCrates <= 0 && totalIce <= 0)
             {
-                Debug.LogWarning($"Level {config.LevelIndex} has no valid boxes. Falling back to template crate placement.");
+                Debug.LogWarning($"Level {config.LevelIndex} has no valid targets. Falling back to template crate placement.");
                 return false;
             }
 
             return true;
+        }
+
+        private LevelConfig LoadCsvLevelConfig(int levelIndex)
+        {
+            var assetPath = string.Format(LevelConfigResourcePattern, levelIndex);
+            var textAsset = Resources.Load<TextAsset>(assetPath);
+            if (textAsset == null)
+            {
+                Debug.LogError($"Missing level CSV Resources/{assetPath}.csv. Falling back to built-in level {levelIndex}.");
+                return null;
+            }
+
+            try
+            {
+                return ParseLevelCsv(levelIndex, textAsset.text);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError($"Failed to parse level CSV {assetPath}: {exception.Message}. Falling back to built-in level {levelIndex}.");
+                return null;
+            }
+        }
+
+        private LevelConfig ParseLevelCsv(int levelIndex, string csv)
+        {
+            var lines = csv
+                .Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)
+                .Select(line => line.Trim())
+                .Where(line => line.Length > 0)
+                .ToList();
+            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var gridRows = new List<string>();
+            var readingGrid = false;
+            foreach (var line in lines)
+            {
+                if (string.Equals(line, "grid", StringComparison.OrdinalIgnoreCase))
+                {
+                    readingGrid = true;
+                    continue;
+                }
+
+                if (readingGrid)
+                {
+                    gridRows.Add(line);
+                    continue;
+                }
+
+                var parts = SplitCsvLine(line);
+                if (parts.Length >= 2)
+                {
+                    values[parts[0].Trim()] = parts[1].Trim();
+                }
+            }
+
+            var boardWidthValue = ParseRequiredLevelInt(values, "boardWidth", Width, levelIndex);
+            var boardHeightValue = ParseRequiredLevelInt(values, "boardHeight", Height, levelIndex);
+            var moveLimitValue = ParseRequiredLevelInt(values, "moveLimit", RoomMoveLimits[Mathf.Clamp(levelIndex - 1, 0, RoomMoveLimits.Length - 1)], levelIndex);
+            var colorCountValue = ParseOptionalLevelInt(values, "colorCount", TileTypes);
+            var levelName = values.TryGetValue("levelName", out var parsedLevelName) ? parsedLevelName : $"Level {levelIndex:00}";
+
+            if (gridRows.Count == 0)
+            {
+                Debug.LogWarning($"Level {levelIndex} CSV has no grid section.");
+            }
+            else if (gridRows.Count != boardHeightValue)
+            {
+                Debug.LogWarning($"Level {levelIndex} CSV grid has {gridRows.Count} rows, expected {boardHeightValue}. Missing rows are treated as empty.");
+            }
+
+            while (gridRows.Count < boardHeightValue)
+            {
+                gridRows.Add(".");
+            }
+
+            if (gridRows.Count > boardHeightValue)
+            {
+                gridRows.RemoveRange(boardHeightValue, gridRows.Count - boardHeightValue);
+            }
+
+            return new LevelConfig(levelIndex, levelName, boardWidthValue, boardHeightValue, moveLimitValue, Mathf.Clamp(colorCountValue, 3, TileTypes), gridRows.ToArray());
+        }
+
+        private int ParseRequiredLevelInt(Dictionary<string, string> values, string key, int fallback, int levelIndex)
+        {
+            if (!values.TryGetValue(key, out var raw) || !int.TryParse(raw, out var value))
+            {
+                Debug.LogWarning($"Level {levelIndex} CSV is missing or has invalid {key}. Using {fallback}.");
+                return fallback;
+            }
+
+            return value;
+        }
+
+        private int ParseOptionalLevelInt(Dictionary<string, string> values, string key, int fallback)
+        {
+            return values.TryGetValue(key, out var raw) && int.TryParse(raw, out var value) ? value : fallback;
+        }
+
+        private string[] SplitCsvLine(string line)
+        {
+            return line.Split(',').Select(part => part.Trim()).ToArray();
+        }
+
+        private LevelCell ParseLevelCellToken(int levelIndex, int row, int x, string rawToken)
+        {
+            var token = string.IsNullOrWhiteSpace(rawToken) ? "." : rawToken.Trim();
+            if (token == ".")
+            {
+                return LevelCell.Empty;
+            }
+
+            var cursor = 0;
+            var crateHp = 0;
+            var iceHp = 0;
+            if (cursor < token.Length && token[cursor] == 'B')
+            {
+                cursor++;
+                if (!TryParseLayerDigit(token, ref cursor, out crateHp))
+                {
+                    WarnInvalidLevelToken(levelIndex, row, x, token);
+                    return LevelCell.Empty;
+                }
+            }
+
+            if (cursor < token.Length && token[cursor] == 'I')
+            {
+                cursor++;
+                if (!TryParseLayerDigit(token, ref cursor, out iceHp))
+                {
+                    WarnInvalidLevelToken(levelIndex, row, x, token);
+                    return LevelCell.Empty;
+                }
+            }
+
+            if (cursor != token.Length || (crateHp <= 0 && iceHp <= 0))
+            {
+                WarnInvalidLevelToken(levelIndex, row, x, token);
+                return LevelCell.Empty;
+            }
+
+            return new LevelCell(crateHp, iceHp);
+        }
+
+        private bool TryParseLayerDigit(string token, ref int cursor, out int value)
+        {
+            value = 0;
+            if (cursor >= token.Length || token[cursor] < '1' || token[cursor] > '3')
+            {
+                return false;
+            }
+
+            value = token[cursor] - '0';
+            cursor++;
+            return true;
+        }
+
+        private void WarnInvalidLevelToken(int levelIndex, int row, int x, string token)
+        {
+            Debug.LogWarning($"Level {levelIndex} has invalid token '{token}' at grid row {row}, x {x}. Treating as empty.");
+        }
+
+        private void ApplyLevelCell(Vector2Int pos, LevelCell cell)
+        {
+            if (cell.CrateHealth > 0)
+            {
+                board[pos.x, pos.y].CrateHealth = cell.CrateHealth;
+                totalCrates++;
+                DecorateTile(board[pos.x, pos.y]);
+            }
+
+            if (cell.IceHealth > 0)
+            {
+                iceHealth[pos.x, pos.y] = cell.IceHealth;
+                totalIce++;
+            }
         }
 
         private CrateLayoutTemplate PickCrateTemplate(int roomNumber)
@@ -957,12 +1139,12 @@ namespace MatchRogue
             }
 
             var fallbackTypes = GetAvailableTileTypes().ToList();
-            return fallbackTypes.Count > 0 ? fallbackTypes[rng.Next(fallbackTypes.Count)] : rng.Next(TileTypes);
+            return fallbackTypes.Count > 0 ? fallbackTypes[rng.Next(fallbackTypes.Count)] : rng.Next(currentColorCount);
         }
 
         private IEnumerable<int> GetAvailableTileTypes()
         {
-            return Enumerable.Range(0, TileTypes).Where(type => !removedTileTypes.Contains(type));
+            return Enumerable.Range(0, currentColorCount).Where(type => !removedTileTypes.Contains(type));
         }
 
         private bool WouldCreateImmediateMatch(int x, int y, int type)
@@ -1162,6 +1344,7 @@ namespace MatchRogue
         private void ClearTiles()
         {
             CancelHint();
+            ClearIceOverlays();
             for (var x = 0; x < Width; x++)
             {
                 for (var y = 0; y < Height; y++)
@@ -1173,6 +1356,84 @@ namespace MatchRogue
 
                     board[x, y] = null;
                 }
+            }
+        }
+
+        private void ClearIceOverlays()
+        {
+            if (iceOverlays == null)
+            {
+                return;
+            }
+
+            for (var x = 0; x < Width; x++)
+            {
+                for (var y = 0; y < Height; y++)
+                {
+                    if (iceOverlays[x, y] != null)
+                    {
+                        Destroy(iceOverlays[x, y]);
+                        iceOverlays[x, y] = null;
+                    }
+                }
+            }
+        }
+
+        private void RefreshAllIceOverlays()
+        {
+            for (var x = 0; x < Width; x++)
+            {
+                for (var y = 0; y < Height; y++)
+                {
+                    RefreshIceOverlay(new Vector2Int(x, y));
+                }
+            }
+        }
+
+        private void RefreshIceOverlay(Vector2Int pos)
+        {
+            if (!IsInside(pos))
+            {
+                return;
+            }
+
+            var hp = iceHealth[pos.x, pos.y];
+            if (hp <= 0)
+            {
+                if (iceOverlays[pos.x, pos.y] != null)
+                {
+                    Destroy(iceOverlays[pos.x, pos.y]);
+                    iceOverlays[pos.x, pos.y] = null;
+                }
+
+                return;
+            }
+
+            var overlay = iceOverlays[pos.x, pos.y];
+            if (overlay == null)
+            {
+                overlay = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                overlay.name = $"Ice {pos.x},{pos.y}";
+                overlay.transform.SetParent(boardRoot);
+                var collider = overlay.GetComponent<Collider>();
+                if (collider != null)
+                {
+                    Destroy(collider);
+                }
+
+                var renderer = overlay.GetComponent<MeshRenderer>();
+                renderer.material = new Material(Shader.Find("Sprites/Default"));
+                iceOverlays[pos.x, pos.y] = overlay;
+            }
+
+            overlay.transform.position = GridToWorld(pos.x, pos.y) + new Vector3(0f, 0f, -0.09f);
+            overlay.transform.localScale = Vector3.one * (tileScale + 0.08f);
+            var meshRenderer = overlay.GetComponent<MeshRenderer>();
+            if (meshRenderer != null)
+            {
+                var alpha = board[pos.x, pos.y] != null && board[pos.x, pos.y].CrateHealth > 0 ? 0.52f : 0.38f;
+                var blue = hp == 1 ? new Color(0.60f, 0.92f, 1f, alpha) : hp == 2 ? new Color(0.30f, 0.72f, 1f, alpha) : new Color(0.12f, 0.45f, 1f, alpha);
+                meshRenderer.material.color = blue;
             }
         }
 
@@ -1289,7 +1550,7 @@ namespace MatchRogue
         {
             return !inputLocked &&
                    !upgradePanelOpen &&
-                   remainingCrates > 0 &&
+                   !AreLevelTargetsCleared() &&
                    movesRemaining > 0 &&
                    board != null;
         }
@@ -1765,6 +2026,10 @@ namespace MatchRogue
             {
                 score = 120f + tile.CrateHealth * 40f;
             }
+            else if (HasIce(target))
+            {
+                score = 105f + iceHealth[target.x, target.y] * 30f;
+            }
 
             if (reserved != null)
             {
@@ -1884,7 +2149,7 @@ namespace MatchRogue
             var candidates = GetAvailableTileTypes().ToList();
             if (candidates.Count == 0)
             {
-                candidates = Enumerable.Range(0, TileTypes).ToList();
+                candidates = Enumerable.Range(0, currentColorCount).ToList();
             }
 
             return candidates
@@ -2051,7 +2316,7 @@ namespace MatchRogue
                 return 0f;
             }
 
-            var crateHits = CountCratesAffectedByMatches(matchedPositions);
+            var crateHits = CountTargetsAffectedByMatches(matchedPositions);
             var score = 10f + matchedPositions.Count;
             if (crateHits > 0)
             {
@@ -2062,7 +2327,7 @@ namespace MatchRogue
             {
                 score += GetSpecialHintValue(special.Value.Special);
                 score += GetBuildHintBonus(special.Value.Special);
-                score += CountCratesAffectedBySpecialPreview(special.Value.Position, special.Value.Special) * 50f;
+                score += CountTargetsAffectedBySpecialPreview(special.Value.Position, special.Value.Special) * 50f;
             }
 
             return score;
@@ -2078,23 +2343,28 @@ namespace MatchRogue
 
             score += GetSpecialHintValue(firstSpecial) + GetSpecialHintValue(secondSpecial);
             score += GetBuildHintBonus(firstSpecial) + GetBuildHintBonus(secondSpecial);
-            score += CountCratesAffectedBySpecialPreview(a, firstSpecial) * 140f;
-            score += CountCratesAffectedBySpecialPreview(b, secondSpecial) * 140f;
+            score += CountTargetsAffectedBySpecialPreview(a, firstSpecial) * 140f;
+            score += CountTargetsAffectedBySpecialPreview(b, secondSpecial) * 140f;
             return score;
         }
 
-        private int CountCratesAffectedByMatches(HashSet<Vector2Int> matchedPositions)
+        private int CountTargetsAffectedByMatches(HashSet<Vector2Int> matchedPositions)
         {
-            var crateHits = new HashSet<Vector2Int>();
+            var targetHits = new HashSet<Vector2Int>();
             foreach (var pos in matchedPositions)
             {
-                AddAdjacentCrates(pos, crateHits);
+                if (HasIce(pos))
+                {
+                    targetHits.Add(pos);
+                }
+
+                AddAdjacentCrates(pos, targetHits);
             }
 
-            return crateHits.Count;
+            return targetHits.Count;
         }
 
-        private int CountCratesAffectedBySpecialPreview(Vector2Int pos, SpecialKind special)
+        private int CountTargetsAffectedBySpecialPreview(Vector2Int pos, SpecialKind special)
         {
             if (special == SpecialKind.None)
             {
@@ -2121,7 +2391,7 @@ namespace MatchRogue
                 AddCross(pos, affected);
             }
 
-            return affected.Count(hit => IsInside(hit) && board[hit.x, hit.y] != null && board[hit.x, hit.y].CrateHealth > 0);
+            return affected.Count(HasTargetAt);
         }
 
         private float GetSpecialHintValue(SpecialKind special)
@@ -2340,7 +2610,7 @@ namespace MatchRogue
 
         private void UpdateIdleHint()
         {
-            if (upgradePanelOpen || remainingCrates <= 0)
+            if (upgradePanelOpen || AreLevelTargetsCleared())
             {
                 CancelHint();
                 lastEffectiveActionTime = Time.unscaledTime;
@@ -2527,7 +2797,7 @@ namespace MatchRogue
                 }
 
                 var normalClearedCount = CountNormalColorClears(bonusClears);
-                DamageCratesForClears(currentClears, bonusClears);
+                DamageTargetsForClears(currentClears, bonusClears);
                 RecordClearPerformance(bonusClears.Count);
                 yield return AnimateAndRemoveClears(bonusClears);
 
@@ -2569,7 +2839,7 @@ namespace MatchRogue
             inputLocked = false;
             MarkEffectiveAction();
 
-            if (remainingCrates <= 0)
+            if (AreLevelTargetsCleared())
             {
                 CompleteRoom();
                 yield break;
@@ -2628,36 +2898,52 @@ namespace MatchRogue
             }
         }
 
-        private void DamageCratesForClears(HashSet<Vector2Int> directClears, HashSet<Vector2Int> finalClears)
+        private void DamageTargetsForClears(HashSet<Vector2Int> directClears, HashSet<Vector2Int> finalClears)
         {
-            var crateHits = new HashSet<Vector2Int>();
+            var targetHits = new HashSet<Vector2Int>();
             foreach (var pos in finalClears)
             {
-                crateHits.Add(pos);
+                targetHits.Add(pos);
             }
 
             foreach (var pos in directClears)
             {
-                AddAdjacentCrates(pos, crateHits);
+                AddAdjacentCrates(pos, targetHits);
             }
 
-            foreach (var pos in crateHits)
+            foreach (var pos in targetHits)
             {
-                if (!IsInside(pos) || board[pos.x, pos.y] == null || board[pos.x, pos.y].CrateHealth <= 0)
+                if (!IsInside(pos))
                 {
                     continue;
                 }
 
                 var wasScheduledToClear = finalClears.Contains(pos);
                 crateDamageBonuses.TryGetValue(pos, out var bonusDamage);
-                var destroyed = DamageCrate(pos, 1 + bonusDamage);
-                if (!destroyed)
+                var hitCrate = board[pos.x, pos.y] != null && board[pos.x, pos.y].CrateHealth > 0;
+                if (hitCrate)
                 {
-                    finalClears.Remove(pos);
+                    var destroyed = DamageCrate(pos, 1 + bonusDamage);
+                    if (!destroyed || HasIce(pos))
+                    {
+                        finalClears.Remove(pos);
+                        if (destroyed && board[pos.x, pos.y] != null)
+                        {
+                            DecorateTile(board[pos.x, pos.y]);
+                        }
+                    }
+                    else if (!wasScheduledToClear && board[pos.x, pos.y] != null)
+                    {
+                        DecorateTile(board[pos.x, pos.y]);
+                    }
+
+                    RefreshIceOverlay(pos);
+                    continue;
                 }
-                else if (!wasScheduledToClear && board[pos.x, pos.y] != null)
+
+                if (HasIce(pos))
                 {
-                    DecorateTile(board[pos.x, pos.y]);
+                    DamageIce(pos, 1 + bonusDamage);
                 }
             }
 
@@ -2703,6 +2989,45 @@ namespace MatchRogue
             StartCoroutine(AnimateCrateHit(tile));
             DecorateTile(tile);
             return false;
+        }
+
+        private bool DamageIce(Vector2Int pos, int damage)
+        {
+            if (!HasIce(pos))
+            {
+                return false;
+            }
+
+            var actualDamage = Mathf.Min(iceHealth[pos.x, pos.y], Mathf.Max(1, damage));
+            iceHealth[pos.x, pos.y] -= actualDamage;
+            iceDamageTotal += actualDamage;
+            if (iceHealth[pos.x, pos.y] <= 0)
+            {
+                iceHealth[pos.x, pos.y] = 0;
+                remainingIce = Mathf.Max(0, remainingIce - 1);
+                clearedIceCount++;
+                RefreshIceOverlay(pos);
+                return true;
+            }
+
+            RefreshIceOverlay(pos);
+            return false;
+        }
+
+        private bool HasIce(Vector2Int pos)
+        {
+            return IsInside(pos) && iceHealth[pos.x, pos.y] > 0;
+        }
+
+        private bool HasTargetAt(Vector2Int pos)
+        {
+            return IsInside(pos) &&
+                   ((board[pos.x, pos.y] != null && board[pos.x, pos.y].CrateHealth > 0) || HasIce(pos));
+        }
+
+        private bool AreLevelTargetsCleared()
+        {
+            return remainingCrates <= 0 && remainingIce <= 0;
         }
 
         private void RegisterCrateDamageBonus(IEnumerable<Vector2Int> positions, int bonus)
@@ -3459,7 +3784,7 @@ namespace MatchRogue
 
             if (board[pos.x, pos.y] == null)
             {
-                board[pos.x, pos.y] = CreateTile(pos.x, pos.y, rng.Next(TileTypes));
+                board[pos.x, pos.y] = CreateTile(pos.x, pos.y, rng.Next(currentColorCount));
             }
 
             board[pos.x, pos.y].Special = pendingSpecial.Special;
@@ -4291,13 +4616,29 @@ namespace MatchRogue
             targetScore = GetAdjustedTargetScore();
             statusText.text =
                 $"Run  第 {room}/{RoomsPerRun} 关\n" +
-                $"目标：清除木箱  剩余 {remainingCrates}/{totalCrates}\n" +
+                $"目标：{FormatTargetStatus()}\n" +
                 $"分数 {score}\n" +
                 $"剩余步数 {movesRemaining} / {roomMoveLimit}\n" +
                 $"Run总分 {runScore} / 最高连锁 {Mathf.Max(1, bestComboChain)}\n" +
                 $"已选强化：{FormatSkillNamesInline()}\n" +
                 GetRoomGoalText();
             RefreshAdButtons();
+        }
+
+        private string FormatTargetStatus()
+        {
+            var targets = new List<string>();
+            if (totalCrates > 0)
+            {
+                targets.Add($"木箱 {remainingCrates}/{totalCrates}");
+            }
+
+            if (totalIce > 0)
+            {
+                targets.Add($"冰块 {remainingIce}/{totalIce}");
+            }
+
+            return targets.Count == 0 ? "无" : string.Join("  ", targets);
         }
 
         private void RefreshAdButtons()
@@ -4308,7 +4649,7 @@ namespace MatchRogue
             }
 
             var canUse = CanUseInLevelAd();
-            var visible = !upgradePanelOpen && remainingCrates > 0;
+            var visible = !upgradePanelOpen && !AreLevelTargetsCleared();
             extraSkillAdButton.gameObject.SetActive(visible && !extraSkillAdUsedThisRun);
             extraSkillAdButton.interactable = canUse && !extraSkillAdUsedThisRun;
             extraMovesAdButton.gameObject.SetActive(visible && !extraMovesAdUsedThisLevel);
@@ -4337,6 +4678,8 @@ namespace MatchRogue
                 propellerTriggerCount = propellerActivationCount,
                 clearedBoxCount = clearedBoxCount,
                 boxDamageTotal = boxDamageTotal,
+                clearedIceCount = clearedIceCount,
+                iceDamageTotal = iceDamageTotal,
                 maxSingleClearCount = maxSingleClearCount,
                 maxComboCount = bestComboChain,
                 totalMovesUsed = totalMovesUsed,
@@ -4427,6 +4770,8 @@ namespace MatchRogue
                 $"- 触发螺旋桨：{record.propellerTriggerCount}次",
                 $"- 清除木箱：{record.clearedBoxCount}个",
                 $"- 木箱总伤害：{record.boxDamageTotal}",
+                $"- 清除冰块：{record.clearedIceCount}个",
+                $"- 冰块总伤害：{record.iceDamageTotal}",
                 $"- 最大单次清除：{record.maxSingleClearCount}",
                 $"- 最高连锁：{record.maxComboCount}",
                 $"- 使用步数：{record.totalMovesUsed}"
@@ -4681,6 +5026,8 @@ namespace MatchRogue
                 }
             }
 
+            RefreshAllIceOverlays();
+
             if (boardRoot == null)
             {
                 return;
@@ -4755,19 +5102,49 @@ namespace MatchRogue
         private sealed class LevelConfig
         {
             public LevelConfig(int levelIndex, int boardWidth, int boardHeight, int moveLimit, string[] boxMapRows)
+                : this(levelIndex, $"Level {levelIndex:00}", boardWidth, boardHeight, moveLimit, TileTypes, ConvertLegacyBoxRows(boxMapRows))
+            {
+            }
+
+            public LevelConfig(int levelIndex, string levelName, int boardWidth, int boardHeight, int moveLimit, int colorCount, string[] gridRows)
             {
                 LevelIndex = levelIndex;
+                LevelName = levelName;
                 BoardWidth = boardWidth;
                 BoardHeight = boardHeight;
                 MoveLimit = moveLimit;
-                BoxMapRows = boxMapRows ?? Array.Empty<string>();
+                ColorCount = colorCount;
+                GridRows = gridRows ?? Array.Empty<string>();
             }
 
             public int LevelIndex { get; }
+            public string LevelName { get; }
             public int BoardWidth { get; }
             public int BoardHeight { get; }
             public int MoveLimit { get; }
-            public string[] BoxMapRows { get; }
+            public int ColorCount { get; }
+            public string[] GridRows { get; }
+
+            private static string[] ConvertLegacyBoxRows(string[] rows)
+            {
+                return (rows ?? Array.Empty<string>())
+                    .Select(row => string.Join(",", (row ?? string.Empty).Select(cell => cell == '.' ? "." : $"B{cell}")))
+                    .ToArray();
+            }
+        }
+
+        private struct LevelCell
+        {
+            public static readonly LevelCell Empty = new LevelCell(0, 0);
+
+            public LevelCell(int crateHealth, int iceHealth)
+            {
+                CrateHealth = crateHealth;
+                IceHealth = iceHealth;
+            }
+
+            public int CrateHealth { get; }
+            public int IceHealth { get; }
         }
 
         private sealed class MatchGroup
@@ -4870,6 +5247,8 @@ namespace MatchRogue
             public int propellerTriggerCount;
             public int clearedBoxCount;
             public int boxDamageTotal;
+            public int clearedIceCount;
+            public int iceDamageTotal;
             public int maxSingleClearCount;
             public int maxComboCount;
             public int totalMovesUsed;
