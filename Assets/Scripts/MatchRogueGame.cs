@@ -1414,35 +1414,65 @@ namespace MatchRogue
             var overlay = iceOverlays[pos.x, pos.y];
             if (overlay == null)
             {
-                overlay = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                overlay = new GameObject($"Ice {pos.x},{pos.y}");
                 overlay.name = $"Ice {pos.x},{pos.y}";
                 overlay.transform.SetParent(boardRoot);
-                var collider = overlay.GetComponent<Collider>();
+                iceOverlays[pos.x, pos.y] = overlay;
+            }
+
+            overlay.transform.position = GridToWorld(pos.x, pos.y);
+            overlay.transform.localScale = Vector3.one;
+            var hasCrateOnTop = board[pos.x, pos.y] != null && board[pos.x, pos.y].CrateHealth > 0;
+            var edgeAlpha = hasCrateOnTop ? 0.92f : 0.98f;
+            var fillAlpha = hasCrateOnTop ? 0.12f : 0.24f;
+            var baseTint = hp == 1
+                ? new Color(0.82f, 0.98f, 1f, 1f)
+                : hp == 2
+                    ? new Color(0.55f, 0.88f, 1f, 1f)
+                    : new Color(0.30f, 0.66f, 1f, 1f);
+
+            var full = tileScale + 0.16f;
+            var edge = Mathf.Max(0.08f, tileScale * 0.16f);
+            ConfigureIcePart(overlay.transform, "IceFill", new Vector3(0f, 0f, -0.105f), new Vector3(full, full, 1f), WithAlpha(baseTint, fillAlpha));
+            ConfigureIcePart(overlay.transform, "IceTop", new Vector3(0f, full * 0.5f - edge * 0.5f, -0.12f), new Vector3(full, edge, 1f), WithAlpha(baseTint, edgeAlpha));
+            ConfigureIcePart(overlay.transform, "IceBottom", new Vector3(0f, -full * 0.5f + edge * 0.5f, -0.12f), new Vector3(full, edge, 1f), WithAlpha(baseTint, edgeAlpha));
+            ConfigureIcePart(overlay.transform, "IceLeft", new Vector3(-full * 0.5f + edge * 0.5f, 0f, -0.12f), new Vector3(edge, full, 1f), WithAlpha(baseTint, edgeAlpha));
+            ConfigureIcePart(overlay.transform, "IceRight", new Vector3(full * 0.5f - edge * 0.5f, 0f, -0.12f), new Vector3(edge, full, 1f), WithAlpha(baseTint, edgeAlpha));
+        }
+
+        private void ConfigureIcePart(Transform parent, string name, Vector3 localPosition, Vector3 localScale, Color tint)
+        {
+            var child = parent.Find(name);
+            if (child == null)
+            {
+                var part = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                part.name = name;
+                part.transform.SetParent(parent);
+                var collider = part.GetComponent<Collider>();
                 if (collider != null)
                 {
                     Destroy(collider);
                 }
 
-                var renderer = overlay.GetComponent<MeshRenderer>();
+                var renderer = part.GetComponent<MeshRenderer>();
                 renderer.material = new Material(Shader.Find("Sprites/Default"));
-                iceOverlays[pos.x, pos.y] = overlay;
+                child = part.transform;
             }
 
-            overlay.transform.position = GridToWorld(pos.x, pos.y) + new Vector3(0f, 0f, -0.095f);
-            overlay.transform.localScale = new Vector3(tileScale + 0.18f, tileScale + 0.18f, 1f);
-            var meshRenderer = overlay.GetComponent<MeshRenderer>();
+            child.localPosition = localPosition;
+            child.localScale = localScale;
+            var meshRenderer = child.GetComponent<MeshRenderer>();
             if (meshRenderer != null)
             {
                 meshRenderer.material.mainTexture = iceTexture;
-                var hasCrateOnTop = board[pos.x, pos.y] != null && board[pos.x, pos.y].CrateHealth > 0;
-                var alpha = hasCrateOnTop ? 0.78f : 0.92f;
-                var tint = hp == 1
-                    ? new Color(0.82f, 0.98f, 1f, alpha)
-                    : hp == 2
-                        ? new Color(0.55f, 0.88f, 1f, alpha)
-                        : new Color(0.30f, 0.66f, 1f, alpha);
-                meshRenderer.material.color = iceTexture == null ? new Color(tint.r, tint.g, tint.b, 0.55f) : tint;
+                meshRenderer.material.color = iceTexture == null ? new Color(tint.r, tint.g, tint.b, Mathf.Min(tint.a, 0.55f)) : tint;
             }
+        }
+
+        private Color WithAlpha(Color color, float alpha)
+        {
+            color.a = alpha;
+            return color;
         }
 
         private void TrySelectTile(Vector2 screenPosition)
