@@ -4044,12 +4044,16 @@ namespace MatchRogue
                 button.onClick.RemoveAllListeners();
                 button.onClick.AddListener(() =>
                 {
-                    ApplyUpgradeSelection(upgrade);
+                    var needsBoardSettle = ApplyUpgradeSelection(upgrade);
                     SetUpgradePanel(false);
                     RefreshAdButtons();
                     if (choiceStartsRoomAfterSelection)
                     {
                         StartRoom();
+                    }
+                    else if (needsBoardSettle)
+                    {
+                        StartCoroutine(SettleBoardAfterImmediateUpgradeRoutine());
                     }
                     else
                     {
@@ -4067,14 +4071,16 @@ namespace MatchRogue
             }
         }
 
-        private void ApplyUpgradeSelection(RogueUpgrade upgrade)
+        private bool ApplyUpgradeSelection(RogueUpgrade upgrade)
         {
             activeUpgrades.Add(upgrade);
             if (IsColorRemovalUpgrade(upgrade.Kind))
             {
                 removedTileTypes.Add(GetRemovedTileType(upgrade.Kind));
-                ClearRemovedColorTiles(GetRemovedTileType(upgrade.Kind));
+                return ClearRemovedColorTiles(GetRemovedTileType(upgrade.Kind));
             }
+
+            return false;
         }
 
         private string GetUpgradeDisplayName(RogueUpgrade upgrade)
@@ -4149,13 +4155,14 @@ namespace MatchRogue
             });
         }
 
-        private void ClearRemovedColorTiles(int tileType)
+        private bool ClearRemovedColorTiles(int tileType)
         {
             if (board == null)
             {
-                return;
+                return false;
             }
 
+            var removedAny = false;
             for (var x = 0; x < Width; x++)
             {
                 for (var y = 0; y < Height; y++)
@@ -4172,8 +4179,25 @@ namespace MatchRogue
                     }
 
                     board[x, y] = null;
+                    removedAny = true;
                 }
             }
+
+            return removedAny;
+        }
+
+        private IEnumerator SettleBoardAfterImmediateUpgradeRoutine()
+        {
+            inputLocked = true;
+            RefreshStatus();
+            var fallMoves = ApplyGravity();
+            var spawnMoves = RefillBoard();
+            fallMoves.AddRange(spawnMoves);
+            yield return AnimateFalls(fallMoves);
+            yield return EnsurePlayableBoardRoutine();
+            inputLocked = false;
+            MarkEffectiveAction();
+            RefreshStatus();
         }
 
         private RogueUpgrade[] RollUpgradeChoices(int completedRoom)
