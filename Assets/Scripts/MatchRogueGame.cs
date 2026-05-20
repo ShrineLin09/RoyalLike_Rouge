@@ -193,6 +193,7 @@ namespace MatchRogue
         private Texture2D propellerIcon;
         private Texture2D backgroundTexture;
         private Texture2D crateTexture;
+        private Texture2D iceTexture;
         private Coroutine triggerTextRoutine;
 
         private Vector2Int? selected;
@@ -336,6 +337,7 @@ namespace MatchRogue
         {
             backgroundTexture = Resources.Load<Texture2D>("Backgrounds/SciFiSpace");
             crateTexture = Resources.Load<Texture2D>("Targets/Crate");
+            iceTexture = Resources.Load<Texture2D>("Targets/IceBlock");
         }
 
         private void ConfigureCameraAndBoardLayout()
@@ -1426,14 +1428,20 @@ namespace MatchRogue
                 iceOverlays[pos.x, pos.y] = overlay;
             }
 
-            overlay.transform.position = GridToWorld(pos.x, pos.y) + new Vector3(0f, 0f, -0.09f);
-            overlay.transform.localScale = Vector3.one * (tileScale + 0.08f);
+            overlay.transform.position = GridToWorld(pos.x, pos.y) + new Vector3(0f, 0f, -0.095f);
+            overlay.transform.localScale = new Vector3(tileScale + 0.18f, tileScale + 0.18f, 1f);
             var meshRenderer = overlay.GetComponent<MeshRenderer>();
             if (meshRenderer != null)
             {
-                var alpha = board[pos.x, pos.y] != null && board[pos.x, pos.y].CrateHealth > 0 ? 0.52f : 0.38f;
-                var blue = hp == 1 ? new Color(0.60f, 0.92f, 1f, alpha) : hp == 2 ? new Color(0.30f, 0.72f, 1f, alpha) : new Color(0.12f, 0.45f, 1f, alpha);
-                meshRenderer.material.color = blue;
+                meshRenderer.material.mainTexture = iceTexture;
+                var hasCrateOnTop = board[pos.x, pos.y] != null && board[pos.x, pos.y].CrateHealth > 0;
+                var alpha = hasCrateOnTop ? 0.78f : 0.92f;
+                var tint = hp == 1
+                    ? new Color(0.82f, 0.98f, 1f, alpha)
+                    : hp == 2
+                        ? new Color(0.55f, 0.88f, 1f, alpha)
+                        : new Color(0.30f, 0.66f, 1f, alpha);
+                meshRenderer.material.color = iceTexture == null ? new Color(tint.r, tint.g, tint.b, 0.55f) : tint;
             }
         }
 
