@@ -23,6 +23,7 @@ namespace MatchRogue
         private const float CascadePauseSeconds = 0.08f;
         private const float HintDelaySeconds = 7f;
         private const float StrongHintDelaySeconds = 12f;
+        private const float SwipeMinPixels = 48f;
         private const int RoomsPerRun = 6;
         private const string LeaderboardPrefsKey = "MatchRogue.RunLeaderboard.v1";
         private const string LevelConfigResourcePattern = "Configs/Levels/Level_{0:00}";
@@ -260,6 +261,10 @@ namespace MatchRogue
         private int lastScreenHeight;
         private float lastClickTime;
         private float lastEffectiveActionTime;
+        private bool pointerTracking;
+        private bool pointerSwapConsumed;
+        private Vector2 pointerDownScreenPosition;
+        private Vector2Int pointerDownGrid;
         private int Width => boardWidth;
         private int Height => boardHeight;
 
@@ -293,17 +298,16 @@ namespace MatchRogue
             {
                 CancelHint();
                 lastEffectiveActionTime = Time.unscaledTime;
+                ResetPointerTracking();
+                HapticManager.Flush();
                 return;
             }
 
-            if (TryGetPrimaryPressPosition(out var screenPosition))
-            {
-                MarkEffectiveAction();
-                TrySelectTile(screenPosition);
-            }
+            HandleBoardPointerInput();
 
             UpdateIdleHint();
             RefreshStatus();
+            HapticManager.Flush();
         }
 
         private void BuildScene()
@@ -469,7 +473,11 @@ namespace MatchRogue
 
             restartButton = CreateButton("Restart", new Vector2(0f, -790f), new Vector2(420f, 90f));
             restartButton.GetComponentInChildren<Text>().text = "重新开始";
-            restartButton.onClick.AddListener(StartRun);
+            restartButton.onClick.AddListener(() =>
+            {
+                HapticManager.Light();
+                StartRun();
+            });
 
             endlessButton = CreateButton("Endless", new Vector2(230f, -790f), new Vector2(360f, 90f));
             endlessButton.GetComponentInChildren<Text>().text = "开始无尽";
@@ -1488,9 +1496,77 @@ namespace MatchRogue
             return color;
         }
 
+        private void HandleBoardPointerInput()
+        {
+            if (TryGetPrimaryPointerDown(out var downPosition))
+            {
+                pointerTracking = false;
+                pointerSwapConsumed = false;
+
+                if (!IsPointerOverUi(downPosition) && TryGetSelectableGridFromScreen(downPosition, out var grid))
+                {
+                    pointerTracking = true;
+                    pointerDownScreenPosition = downPosition;
+                    pointerDownGrid = grid;
+                }
+            }
+
+            if (pointerTracking && !pointerSwapConsumed && TryGetPrimaryPointerPosition(out var currentPosition))
+            {
+                var delta = currentPosition - pointerDownScreenPosition;
+                if (delta.magnitude >= SwipeMinPixels)
+                {
+                    var direction = Mathf.Abs(delta.x) >= Mathf.Abs(delta.y)
+                        ? new Vector2Int(delta.x > 0f ? 1 : -1, 0)
+                        : new Vector2Int(0, delta.y > 0f ? 1 : -1);
+                    var target = pointerDownGrid + direction;
+                    if (CanSwapTiles(pointerDownGrid, target))
+                    {
+                        if (selected.HasValue)
+                        {
+                            Deselect(selected.Value);
+                            selected = null;
+                        }
+
+                        pointerSwapConsumed = true;
+                        MarkEffectiveAction();
+                        TrySwap(pointerDownGrid, target);
+                    }
+                    else
+                    {
+                        ResetPointerTracking();
+                    }
+                }
+            }
+
+            if (TryGetPrimaryPointerUp(out var upPosition))
+            {
+                if (!pointerSwapConsumed)
+                {
+                    MarkEffectiveAction();
+                    TrySelectTile(upPosition);
+                }
+
+                ResetPointerTracking();
+            }
+        }
+
+        private bool TryGetSelectableGridFromScreen(Vector2 screenPosition, out Vector2Int grid)
+        {
+            var world = mainCamera.ScreenToWorldPoint(screenPosition);
+            grid = WorldToGrid(world);
+            return IsInside(grid) && IsSelectableTile(grid);
+        }
+
+        private void ResetPointerTracking()
+        {
+            pointerTracking = false;
+            pointerSwapConsumed = false;
+        }
+
         private void TrySelectTile(Vector2 screenPosition)
         {
-            if (IsPointerOverUi())
+            if (IsPointerOverUi(screenPosition))
             {
                 return;
             }
@@ -1613,6 +1689,7 @@ namespace MatchRogue
                 return;
             }
 
+            HapticManager.Light();
             ShowRewardedAd(() =>
             {
                 extraSkillAdUsedThisRun = true;
@@ -1628,6 +1705,7 @@ namespace MatchRogue
                 return;
             }
 
+            HapticManager.Light();
             ShowRewardedAd(() =>
             {
                 extraMovesAdUsedThisLevel = true;
@@ -1645,6 +1723,7 @@ namespace MatchRogue
                 return;
             }
 
+            HapticManager.Light();
             ShowRewardedAd(() =>
             {
                 shuffleAdUsedThisLevel = true;
@@ -1694,6 +1773,7 @@ namespace MatchRogue
                 return;
             }
 
+            HapticManager.Light();
             SpendMove();
             ResolveMatches(matches, GetPreferredSpecialSpawn(a, b, matches));
         }
@@ -1711,6 +1791,7 @@ namespace MatchRogue
 
             var clearSet = new HashSet<Vector2Int> { pos };
             var manualSpecial = board[pos.x, pos.y].Special;
+            PlaySpecialHaptic(manualSpecial);
             PendingSpecial? aftershock = GetManualAftershock(pos, manualSpecial);
             if (manualSpecial == SpecialKind.Rainbow)
             {
@@ -1796,6 +1877,7 @@ namespace MatchRogue
 
             if (firstSpecial == SpecialKind.Rainbow && secondSpecial == SpecialKind.Rainbow)
             {
+                HapticManager.Success();
                 rainbowActivationCount += 2;
                 AddEntireBoard(clearSet);
                 AwardScoreForClears(clearSet.Count);
@@ -1826,6 +1908,7 @@ namespace MatchRogue
 
             if (firstIsRocket && secondIsRocket)
             {
+                HapticManager.Medium();
                 rocketActivationCount += 2;
                 AddRow(b.y, clearSet);
                 AddColumn(b.x, clearSet);
@@ -1836,6 +1919,7 @@ namespace MatchRogue
 
             if (firstSpecial == SpecialKind.Bomb && secondSpecial == SpecialKind.Bomb)
             {
+                HapticManager.Heavy();
                 bombActivationCount += 2;
                 AddRadius(b, 3, clearSet);
                 AwardScoreForClears(clearSet.Count);
@@ -1845,6 +1929,7 @@ namespace MatchRogue
 
             if ((firstIsRocket && secondSpecial == SpecialKind.Bomb) || (secondIsRocket && firstSpecial == SpecialKind.Bomb))
             {
+                HapticManager.Heavy();
                 rocketActivationCount++;
                 bombActivationCount++;
                 AddStrongRocketBombClear(b, clearSet);
@@ -1882,6 +1967,8 @@ namespace MatchRogue
 
         private void ResolvePropellerCombination(Vector2Int propellerPos, Vector2Int partnerPos, SpecialKind partnerSpecial, HashSet<Vector2Int> clearSet)
         {
+            PlaySpecialHaptic(SpecialKind.Propeller);
+            PlaySpecialHaptic(partnerSpecial);
             propellerActivationCount++;
             var reservedTargets = new HashSet<Vector2Int> { propellerPos, partnerPos };
             var mode = GetPropellerTargetMode(partnerSpecial);
@@ -1934,6 +2021,7 @@ namespace MatchRogue
 
         private void ResolveRainbowSpecialCombination(SpecialKind targetSpecial, HashSet<Vector2Int> clearSet)
         {
+            HapticManager.Medium();
             rainbowActivationCount++;
             var targetType = GetMostCommonTileType();
             var maxCount = targetSpecial == SpecialKind.Bomb ? 9 : IsRocket(targetSpecial) ? 14 : int.MaxValue;
@@ -2888,6 +2976,15 @@ namespace MatchRogue
                 }
 
                 comboChain++;
+                if (comboChain >= 5)
+                {
+                    HapticManager.Success();
+                }
+                else if (comboChain >= 3)
+                {
+                    HapticManager.Medium();
+                }
+
                 currentClears = new HashSet<Vector2Int>(cascades.SelectMany(group => group.Positions));
                 currentNormalMatchClearCount = CountNormalColorClears(currentClears);
                 currentSpecial = DetermineSpecialKind(cascades, GetPreferredSpecialSpawn(null, null, cascades));
@@ -3039,6 +3136,7 @@ namespace MatchRogue
             boxDamageTotal += actualDamage;
             if (tile.CrateHealth <= 0)
             {
+                HapticManager.Medium();
                 tile.Object.transform.localScale = Vector3.one * tileScale;
                 remainingCrates = Mathf.Max(0, remainingCrates - 1);
                 clearedBoxCount++;
@@ -3046,6 +3144,7 @@ namespace MatchRogue
                 return true;
             }
 
+            HapticManager.Light();
             StartCoroutine(AnimateCrateHit(tile));
             DecorateTile(tile);
             return false;
@@ -3063,6 +3162,7 @@ namespace MatchRogue
             iceDamageTotal += actualDamage;
             if (iceHealth[pos.x, pos.y] <= 0)
             {
+                HapticManager.Medium();
                 iceHealth[pos.x, pos.y] = 0;
                 remainingIce = Mathf.Max(0, remainingIce - 1);
                 clearedIceCount++;
@@ -3070,6 +3170,7 @@ namespace MatchRogue
                 return true;
             }
 
+            HapticManager.Light();
             RefreshIceOverlay(pos);
             return false;
         }
@@ -3553,6 +3654,7 @@ namespace MatchRogue
 
         private void AddRocketClear(Vector2Int pos, MatchOrientation orientation, HashSet<Vector2Int> output)
         {
+            HapticManager.Medium();
             rocketActivationCount++;
             if (orientation == MatchOrientation.Horizontal)
             {
@@ -3574,6 +3676,7 @@ namespace MatchRogue
 
         private void AddBombClear(Vector2Int pos, HashSet<Vector2Int> output)
         {
+            HapticManager.Heavy();
             bombActivationCount++;
             var radius = 2;
             var damageBonus = GetUpgradeLevel(UpgradeKind.BombDamage);
@@ -3590,6 +3693,7 @@ namespace MatchRogue
 
         private void ApplyRainbowBonusClears(Vector2Int pos, HashSet<Vector2Int> output)
         {
+            HapticManager.Medium();
             rainbowActivationCount++;
             var mutationLevel = GetUpgradeLevel(UpgradeKind.RainbowMutation);
             if (mutationLevel > 0)
@@ -3613,6 +3717,7 @@ namespace MatchRogue
 
         private void AddPropellerClear(Vector2Int pos, HashSet<Vector2Int> output)
         {
+            HapticManager.Light();
             propellerActivationCount++;
             var reservedTargets = new HashSet<Vector2Int>(output) { pos };
             var target = GetSmartPropellerTarget(PropellerTargetMode.Single, reservedTargets);
@@ -4032,6 +4137,7 @@ namespace MatchRogue
 
         private void CompleteRoom()
         {
+            HapticManager.Success();
             inputLocked = true;
             RecordCompletedRoomMoves();
             if (room >= RoomsPerRun)
@@ -4113,6 +4219,7 @@ namespace MatchRogue
                 button.onClick.RemoveAllListeners();
                 button.onClick.AddListener(() =>
                 {
+                    HapticManager.Light();
                     var needsBoardSettle = ApplyUpgradeSelection(upgrade);
                     SetUpgradePanel(false);
                     RefreshAdButtons();
@@ -4136,7 +4243,11 @@ namespace MatchRogue
                 refreshButton.interactable = !optionRefreshUsed[i];
                 refreshButton.onClick.RemoveAllListeners();
                 var optionIndex = i;
-                refreshButton.onClick.AddListener(() => OnRefreshUpgradeOptionAdClicked(optionIndex));
+                refreshButton.onClick.AddListener(() =>
+                {
+                    HapticManager.Light();
+                    OnRefreshUpgradeOptionAdClicked(optionIndex);
+                });
             }
         }
 
@@ -4750,6 +4861,7 @@ namespace MatchRogue
 
         private void FailRun()
         {
+            HapticManager.Fail();
             RefreshAdButtons();
             ShowRunSummary(false, room);
         }
@@ -5076,6 +5188,27 @@ namespace MatchRogue
             return upgradePanelOpen || EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
         }
 
+        private bool IsPointerOverUi(Vector2 screenPosition)
+        {
+            if (upgradePanelOpen)
+            {
+                return true;
+            }
+
+            if (EventSystem.current == null)
+            {
+                return false;
+            }
+
+            var eventData = new PointerEventData(EventSystem.current)
+            {
+                position = screenPosition
+            };
+            var results = new List<RaycastResult>();
+            EventSystem.current.RaycastAll(eventData, results);
+            return results.Count > 0;
+        }
+
         private int GetAdjustedTargetScore()
         {
             return Mathf.Max(300, baseTargetScore);
@@ -5162,7 +5295,7 @@ namespace MatchRogue
             return Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         }
 
-        private bool TryGetPrimaryPressPosition(out Vector2 screenPosition)
+        private bool TryGetPrimaryPointerDown(out Vector2 screenPosition)
         {
 #if ENABLE_INPUT_SYSTEM
             if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
@@ -5180,7 +5313,87 @@ namespace MatchRogue
             screenPosition = Vector2.zero;
             return false;
 #else
+            if (Input.touchCount > 0 && Input.GetTouch(0).phase == TouchPhase.Began)
+            {
+                screenPosition = Input.GetTouch(0).position;
+                return true;
+            }
+
             if (Input.GetMouseButtonDown(0))
+            {
+                screenPosition = Input.mousePosition;
+                return true;
+            }
+
+            screenPosition = Vector2.zero;
+            return false;
+#endif
+        }
+
+        private bool TryGetPrimaryPointerPosition(out Vector2 screenPosition)
+        {
+#if ENABLE_INPUT_SYSTEM
+            if (Mouse.current != null && Mouse.current.leftButton.isPressed)
+            {
+                screenPosition = Mouse.current.position.ReadValue();
+                return true;
+            }
+
+            if (Touchscreen.current != null && Touchscreen.current.primaryTouch.press.isPressed)
+            {
+                screenPosition = Touchscreen.current.primaryTouch.position.ReadValue();
+                return true;
+            }
+
+            screenPosition = Vector2.zero;
+            return false;
+#else
+            if (Input.touchCount > 0)
+            {
+                screenPosition = Input.GetTouch(0).position;
+                return true;
+            }
+
+            if (Input.GetMouseButton(0))
+            {
+                screenPosition = Input.mousePosition;
+                return true;
+            }
+
+            screenPosition = Vector2.zero;
+            return false;
+#endif
+        }
+
+        private bool TryGetPrimaryPointerUp(out Vector2 screenPosition)
+        {
+#if ENABLE_INPUT_SYSTEM
+            if (Mouse.current != null && Mouse.current.leftButton.wasReleasedThisFrame)
+            {
+                screenPosition = Mouse.current.position.ReadValue();
+                return true;
+            }
+
+            if (Touchscreen.current != null && Touchscreen.current.primaryTouch.press.wasReleasedThisFrame)
+            {
+                screenPosition = Touchscreen.current.primaryTouch.position.ReadValue();
+                return true;
+            }
+
+            screenPosition = Vector2.zero;
+            return false;
+#else
+            if (Input.touchCount > 0)
+            {
+                var touch = Input.GetTouch(0);
+                if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
+                {
+                    screenPosition = touch.position;
+                    return true;
+                }
+            }
+
+            if (Input.GetMouseButtonUp(0))
             {
                 screenPosition = Input.mousePosition;
                 return true;
@@ -5275,6 +5488,26 @@ namespace MatchRogue
         private bool IsRocket(SpecialKind special)
         {
             return special == SpecialKind.LineHorizontal || special == SpecialKind.LineVertical;
+        }
+
+        private void PlaySpecialHaptic(SpecialKind special)
+        {
+            if (IsRocket(special))
+            {
+                HapticManager.Medium();
+            }
+            else if (special == SpecialKind.Bomb)
+            {
+                HapticManager.Heavy();
+            }
+            else if (special == SpecialKind.Rainbow)
+            {
+                HapticManager.Medium();
+            }
+            else if (special == SpecialKind.Propeller)
+            {
+                HapticManager.Light();
+            }
         }
 
         private sealed class Tile
