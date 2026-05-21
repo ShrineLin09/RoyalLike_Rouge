@@ -1717,7 +1717,7 @@ namespace MatchRogue
             }
 
             AwardScoreForClears(clearSet.Count);
-            ResolveClearSet(clearSet, aftershock);
+            ResolveClearSet(clearSet, aftershock, true, 0, 0);
             return true;
         }
 
@@ -1782,7 +1782,7 @@ namespace MatchRogue
             }
 
             AwardScoreForClears(clearSet.Count);
-            ResolveClearSet(clearSet, specialToCreate);
+            ResolveClearSet(clearSet, specialToCreate, true, 0, CountNormalColorClears(new HashSet<Vector2Int>(matches.SelectMany(group => group.Positions))));
             return true;
         }
 
@@ -1797,7 +1797,7 @@ namespace MatchRogue
                 rainbowActivationCount += 2;
                 AddEntireBoard(clearSet);
                 AwardScoreForClears(clearSet.Count);
-                ResolveClearSet(clearSet, null, false, 2);
+                ResolveClearSet(clearSet, null, false, 2, 0);
                 return;
             }
 
@@ -1828,7 +1828,7 @@ namespace MatchRogue
                 AddRow(b.y, clearSet);
                 AddColumn(b.x, clearSet);
                 AwardScoreForClears(clearSet.Count);
-                ResolveClearSet(clearSet, null, false, 2);
+                ResolveClearSet(clearSet, null, false, 2, 0);
                 return;
             }
 
@@ -1837,7 +1837,7 @@ namespace MatchRogue
                 bombActivationCount += 2;
                 AddRadius(b, 3, clearSet);
                 AwardScoreForClears(clearSet.Count);
-                ResolveClearSet(clearSet, null, false, 2);
+                ResolveClearSet(clearSet, null, false, 2, 0);
                 return;
             }
 
@@ -1847,12 +1847,12 @@ namespace MatchRogue
                 bombActivationCount++;
                 AddStrongRocketBombClear(b, clearSet);
                 AwardScoreForClears(clearSet.Count);
-                ResolveClearSet(clearSet, null, false, 2);
+                ResolveClearSet(clearSet, null, false, 2, 0);
                 return;
             }
 
             AwardScoreForClears(clearSet.Count);
-            ResolveClearSet(clearSet, null);
+            ResolveClearSet(clearSet, null, true, 0, 0);
         }
 
         private PendingSpecial? GetManualAftershock(Vector2Int pos, SpecialKind special)
@@ -1927,7 +1927,7 @@ namespace MatchRogue
             }
 
             AwardScoreForClears(clearSet.Count);
-            ResolveClearSet(clearSet, null, false, 2);
+            ResolveClearSet(clearSet, null, false, 2, 0);
         }
 
         private void ResolveRainbowSpecialCombination(SpecialKind targetSpecial, HashSet<Vector2Int> clearSet)
@@ -1992,7 +1992,7 @@ namespace MatchRogue
             }
 
             AwardScoreForClears(clearSet.Count);
-            ResolveClearSet(clearSet, null, false, 2);
+            ResolveClearSet(clearSet, null, false, 2, 0);
         }
 
         private void ResolveRainbowPropellerCombination(List<Vector2Int> propellerPositions, HashSet<Vector2Int> clearSet)
@@ -2013,7 +2013,7 @@ namespace MatchRogue
             }
 
             AwardScoreForClears(clearSet.Count);
-            ResolveClearSet(clearSet, null, false, 2);
+            ResolveClearSet(clearSet, null, false, 2, 0);
         }
 
         private PropellerTargetMode GetPropellerTargetMode(SpecialKind partnerSpecial)
@@ -2801,7 +2801,7 @@ namespace MatchRogue
             var specialToCreate = DetermineSpecialKind(matchGroups, specialSpawn);
             AwardScoreForClears(matchedPositions.Count);
 
-            ResolveClearSet(matchedPositions, specialToCreate);
+            ResolveClearSet(matchedPositions, specialToCreate, true, 0, CountNormalColorClears(matchedPositions));
         }
 
         private void AwardScoreForClears(int clearCount)
@@ -2817,16 +2817,17 @@ namespace MatchRogue
             maxSingleClearCount = Mathf.Max(maxSingleClearCount, clearCount);
         }
 
-        private void ResolveClearSet(HashSet<Vector2Int> baseClears, PendingSpecial? specialToCreate, bool expandSpecials = true, int initialTriggeredSpecialCount = 0)
+        private void ResolveClearSet(HashSet<Vector2Int> baseClears, PendingSpecial? specialToCreate, bool expandSpecials = true, int initialTriggeredSpecialCount = 0, int initialNormalMatchClearCount = -1)
         {
-            StartCoroutine(ResolveClearSetRoutine(baseClears, specialToCreate, expandSpecials, initialTriggeredSpecialCount));
+            StartCoroutine(ResolveClearSetRoutine(baseClears, specialToCreate, expandSpecials, initialTriggeredSpecialCount, initialNormalMatchClearCount));
         }
 
-        private IEnumerator ResolveClearSetRoutine(HashSet<Vector2Int> baseClears, PendingSpecial? specialToCreate, bool expandSpecials = true, int initialTriggeredSpecialCount = 0)
+        private IEnumerator ResolveClearSetRoutine(HashSet<Vector2Int> baseClears, PendingSpecial? specialToCreate, bool expandSpecials = true, int initialTriggeredSpecialCount = 0, int initialNormalMatchClearCount = -1)
         {
             var currentClears = baseClears;
             var currentSpecial = specialToCreate;
             var currentExpandSpecials = expandSpecials;
+            var currentNormalMatchClearCount = initialNormalMatchClearCount >= 0 ? initialNormalMatchClearCount : CountNormalColorClears(baseClears);
 
             while (true)
             {
@@ -2845,7 +2846,8 @@ namespace MatchRogue
                     bonusClears.Remove(currentSpecial.Value.Position);
                 }
 
-                var normalClearedCount = CountNormalColorClears(bonusClears);
+                var normalClearedCount = currentNormalMatchClearCount;
+                currentNormalMatchClearCount = 0;
                 DamageTargetsForClears(currentClears, bonusClears);
                 RecordClearPerformance(bonusClears.Count);
                 yield return AnimateAndRemoveClears(bonusClears);
@@ -2885,6 +2887,7 @@ namespace MatchRogue
 
                 comboChain++;
                 currentClears = new HashSet<Vector2Int>(cascades.SelectMany(group => group.Positions));
+                currentNormalMatchClearCount = CountNormalColorClears(currentClears);
                 currentSpecial = DetermineSpecialKind(cascades, GetPreferredSpecialSpawn(null, null, cascades));
                 currentExpandSpecials = true;
                 AwardScoreForClears(currentClears.Count);
