@@ -3593,7 +3593,7 @@ namespace MatchRogue
             if (mutationLevel > 0)
             {
                 ShowUpgradeTrigger(GetUpgradeDefinition(UpgradeKind.RainbowMutation));
-                var chance = mutationLevel == 1 ? 0.15f : mutationLevel == 2 ? 0.3f : 0.5f;
+                var chance = mutationLevel == 1 ? 0.05f : mutationLevel == 2 ? 0.07f : 0.10f;
                 foreach (var clearedPos in output.ToArray())
                 {
                     if (clearedPos == pos || !IsInside(clearedPos) || !IsColorTile(board[clearedPos.x, clearedPos.y]))
@@ -4211,7 +4211,7 @@ namespace MatchRogue
                 case UpgradeKind.RainbowReserve:
                     return $"每关开始时额外生成{GetLevelValue(nextLevel, 1, 2, 2)}个彩球。";
                 case UpgradeKind.RainbowMutation:
-                    return $"彩球触发后，被消除的方块处有{GetLevelValue(nextLevel, 15, 30, 50)}%概率生成螺旋桨。";
+                    return $"彩球触发后，被消除的方块处有{GetLevelValue(nextLevel, 5, 7, 10)}%概率生成螺旋桨。";
                 case UpgradeKind.PropellerSpawn:
                     return $"累计触发{GetLevelValue(nextLevel, 8, 6, 4)}个特效后生成螺旋桨。";
                 case UpgradeKind.PropellerReserve:
@@ -4696,7 +4696,7 @@ namespace MatchRogue
                 new RogueUpgrade(UpgradeKind.RainbowSpawn, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩虹凝结", "累计触发15/13/10个特效后生成彩球。", 3, false),
                 new RogueUpgrade(UpgradeKind.RainbowAftershock, UpgradeFaction.Rainbow, UpgradeRarity.Rare, "彩虹余波", "彩球被手动触发后，在触发处留下一个炸弹。", 1, false),
                 new RogueUpgrade(UpgradeKind.RainbowReserve, UpgradeFaction.Rainbow, UpgradeRarity.Epic, "彩虹储备", "每关开始时额外生成1/2个彩球。", 2, false),
-                new RogueUpgrade(UpgradeKind.RainbowMutation, UpgradeFaction.Rainbow, UpgradeRarity.Epic, "彩虹异变", "彩球触发后，被消除的方块处有15%/30%/50%概率生成螺旋桨。", 3, false),
+                new RogueUpgrade(UpgradeKind.RainbowMutation, UpgradeFaction.Rainbow, UpgradeRarity.Epic, "彩虹异变", "彩球触发后，被消除的方块处有5%/7%/10%概率生成螺旋桨。", 3, false),
 
                 new RogueUpgrade(UpgradeKind.PropellerCore, UpgradeFaction.Propeller, UpgradeRarity.Common, "螺旋核心", "单个螺旋桨额外锁定1个目标；每关开始生成4个螺旋桨。", 1, true),
                 new RogueUpgrade(UpgradeKind.PropellerSpawn, UpgradeFaction.Propeller, UpgradeRarity.Common, "起飞补给", "累计触发8/6/4个特效后生成螺旋桨。", 3, false),
