@@ -1,18 +1,18 @@
-levelName,Level 03
-boardWidth,9
-boardHeight,11
-moveLimit,34
-colorCount,6
-
-grid
+levelName,Level 03,,,,,,,
+boardWidth,9,,,,,,,
+boardHeight,11,,,,,,,
+moveLimit,34,,,,,,,
+colorCount,6,,,,,,,
+,,,,,,,,
+grid,,,,,,,,
 .,.,.,.,.,.,.,.,.
-.,.,I1,.,.,.,I1,.,.
-.,.,.,I1,.,I1,.,.,.
-.,.,B1,B1I1,B1,B1I1,B1,.,.
-.,B1,B2,B2I1,B2,B2I1,B2,B1,.
-.,.,B2,B3I1,B3,B3I1,B2,.,.
+.,.,I1,I1,I1,I1,I1,.,.
+.,B1,B1,B1,B1,B1,B1,B1,.
+.,B1,I1,I1,I2,I1,I1,B1,.
+.,B1,I1,B2I1,B2I1,B2I1,I1,B1,.
+.,B1,I2,B2I1,B3I1,B2I1,I2,B1,.
+.,B1,I1,B2I1,B2I1,B2I1,I1,B1,.
+.,B1,I1,I1,I2,I1,I1,B1,.
+.,B1,B1,B1,B1,B1,B1,B1,.
+.,.,I1,I1,I1,I1,I1,.,.
 .,.,.,.,.,.,.,.,.
-B1,B1,.,I1,.,I1,.,B1,B1
-.,.,.,B2,B2I1,.,.,.,.
-.,.,I1,.,.,.,I1,.,.
-.,B1,.,.,.,.,.,B1,.
