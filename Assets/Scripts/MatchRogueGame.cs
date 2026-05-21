@@ -244,6 +244,7 @@ namespace MatchRogue
         private int propellerSpawnClearProgress;
         private int edgeWalkerClearProgress;
         private int bottomSweepClearProgress;
+        private int columnSweepClearProgress;
         private int bombCoreClearProgress;
         private int rocketCoreClearProgress;
         private int rainbowCoreClearProgress;
@@ -611,6 +612,7 @@ namespace MatchRogue
             propellerSpawnClearProgress = 0;
             edgeWalkerClearProgress = 0;
             bottomSweepClearProgress = 0;
+            columnSweepClearProgress = 0;
             bombCoreClearProgress = 0;
             rocketCoreClearProgress = 0;
             rainbowCoreClearProgress = 0;
@@ -3295,8 +3297,9 @@ namespace MatchRogue
             TryCreateSpecialByClearProgress(UpgradeKind.RainbowSpawn, ref rainbowSpawnClearProgress, triggeredSpecialCount, 15, 13, 10, () => SpecialKind.Rainbow);
             TryCreateSpecialByClearProgress(UpgradeKind.PropellerSpawn, ref propellerSpawnClearProgress, triggeredSpecialCount, 8, 6, 4, () => SpecialKind.Propeller);
             TryCreateSpecialByClearProgress(UpgradeKind.PropellerRebirth, ref propellerRebirthMatchProgress, normalClearedCount, 8, 8, 8, () => SpecialKind.Propeller);
-            TryAddClearEffectByProgress(UpgradeKind.EdgeWalker, ref edgeWalkerClearProgress, normalClearedCount, 12, 10, 8, upgradeClears, AddEdgeColumns);
-            TryAddClearEffectByProgress(UpgradeKind.BottomSweep, ref bottomSweepClearProgress, normalClearedCount, 14, 12, 10, upgradeClears, AddBottomRows);
+            TryAddClearEffectByProgress(UpgradeKind.EdgeWalker, ref edgeWalkerClearProgress, normalClearedCount, 18, 16, 12, upgradeClears, AddEdgeColumns);
+            TryAddClearEffectByProgress(UpgradeKind.BottomSweep, ref bottomSweepClearProgress, normalClearedCount, 20, 18, 14, upgradeClears, AddBottomRows);
+            TryAddClearEffectByProgress(UpgradeKind.ColumnSweep, ref columnSweepClearProgress, normalClearedCount, 22, 20, 16, upgradeClears, AddRandomInnerColumn);
             return upgradeClears;
         }
 
@@ -3334,6 +3337,12 @@ namespace MatchRogue
         {
             AddRow(0, output);
             AddRow(Mathf.Min(1, Height - 1), output);
+        }
+
+        private void AddRandomInnerColumn(HashSet<Vector2Int> output)
+        {
+            var x = Width <= 2 ? rng.Next(Width) : rng.Next(1, Width - 1);
+            AddColumn(x, output);
         }
 
         private void TryCreateSpecialByClearProgress(UpgradeKind kind, ref int clearProgress, int clearedCount, int levelOneThreshold, int levelTwoThreshold, int levelThreeThreshold, Func<SpecialKind> specialFactory)
@@ -4135,7 +4144,40 @@ namespace MatchRogue
                 return ClearRemovedColorTiles(GetRemovedTileType(upgrade.Kind));
             }
 
+            if (upgrade.Kind == UpgradeKind.CardMaster)
+            {
+                return GrantRandomUnlockedUpgrades(3);
+            }
+
             return false;
+        }
+
+        private bool GrantRandomUnlockedUpgrades(int count)
+        {
+            var needsBoardSettle = false;
+            var candidates = GetAvailableUpgradePool(currentUpgradeChoiceCompletedRoom)
+                .Where(upgrade => upgrade.Kind != UpgradeKind.CardMaster)
+                .Where(upgrade => activeUpgrades.Count(owned => owned.Kind == upgrade.Kind) < upgrade.MaxLevel)
+                .ToList();
+            for (var i = 0; i < count && candidates.Count > 0; i++)
+            {
+                var picked = PickWeightedUpgrade(candidates);
+                if (string.IsNullOrEmpty(picked.Name))
+                {
+                    break;
+                }
+
+                activeUpgrades.Add(picked);
+                if (IsColorRemovalUpgrade(picked.Kind))
+                {
+                    removedTileTypes.Add(GetRemovedTileType(picked.Kind));
+                    needsBoardSettle |= ClearRemovedColorTiles(GetRemovedTileType(picked.Kind));
+                }
+
+                candidates.RemoveAll(upgrade => upgrade.Kind == picked.Kind && activeUpgrades.Count(owned => owned.Kind == upgrade.Kind) >= upgrade.MaxLevel);
+            }
+
+            return needsBoardSettle;
         }
 
         private string GetUpgradeDisplayName(RogueUpgrade upgrade)
@@ -4176,9 +4218,13 @@ namespace MatchRogue
                 case UpgradeKind.PropellerBoost:
                     return $"螺旋桨原地爆炸时的范围扩大为横纵方向的{GetLevelValue(nextLevel, 2, 3, 3)}格。";
                 case UpgradeKind.EdgeWalker:
-                    return $"每累计完成{GetLevelValue(nextLevel, 12, 10, 8)}次普通消除，对左右边缘列进行一次消除。";
+                    return $"每累计完成{GetLevelValue(nextLevel, 18, 16, 12)}次普通消除，对左右边缘列进行一次消除。";
                 case UpgradeKind.BottomSweep:
-                    return $"每累计完成{GetLevelValue(nextLevel, 14, 12, 10)}次普通消除，对最底部的两行进行一次消除。";
+                    return $"每累计完成{GetLevelValue(nextLevel, 20, 18, 14)}次普通消除，对最底部的两行进行一次消除。";
+                case UpgradeKind.ColumnSweep:
+                    return $"每累计完成{GetLevelValue(nextLevel, 22, 20, 16)}次普通消除，对除最左右列以外的随机一列进行一次消除。";
+                case UpgradeKind.CardMaster:
+                    return "随机获得3个当前已解锁技能。";
                 default:
                     return upgrade.Description;
             }
@@ -4662,8 +4708,10 @@ namespace MatchRogue
                 new RogueUpgrade(UpgradeKind.RemoveOrange, UpgradeFaction.General, UpgradeRarity.Rare, "橙色警告", "移除所有橙色方块。", 1, false),
                 new RogueUpgrade(UpgradeKind.RemovePurple, UpgradeFaction.General, UpgradeRarity.Rare, "紫色警告", "移除所有紫色方块。", 1, false),
                 new RogueUpgrade(UpgradeKind.RemoveGreen, UpgradeFaction.General, UpgradeRarity.Rare, "绿色警告", "移除所有绿色方块。", 1, false),
-                new RogueUpgrade(UpgradeKind.EdgeWalker, UpgradeFaction.General, UpgradeRarity.Common, "边缘行者", "每累计完成12/10/8次普通消除，对左右边缘列进行一次消除。", 3, false),
-                new RogueUpgrade(UpgradeKind.BottomSweep, UpgradeFaction.General, UpgradeRarity.Common, "釜底抽薪", "每累计完成14/12/10次普通消除，对最底部的两行进行一次消除。", 3, false)
+                new RogueUpgrade(UpgradeKind.EdgeWalker, UpgradeFaction.General, UpgradeRarity.Common, "边缘行者", "每累计完成18/16/12次普通消除，对左右边缘列进行一次消除。", 3, false),
+                new RogueUpgrade(UpgradeKind.BottomSweep, UpgradeFaction.General, UpgradeRarity.Common, "釜底抽薪", "每累计完成20/18/14次普通消除，对最底部的两行进行一次消除。", 3, false),
+                new RogueUpgrade(UpgradeKind.ColumnSweep, UpgradeFaction.General, UpgradeRarity.Common, "一杆清台", "每累计完成22/20/16次普通消除，对除最左右列以外的随机一列进行一次消除。", 3, false),
+                new RogueUpgrade(UpgradeKind.CardMaster, UpgradeFaction.General, UpgradeRarity.Rare, "卡牌大师", "随机获得3个技能。", 1, false)
             };
         }
 
@@ -5419,7 +5467,9 @@ namespace MatchRogue
             RemovePurple,
             RemoveGreen,
             EdgeWalker,
-            BottomSweep
+            BottomSweep,
+            ColumnSweep,
+            CardMaster
         }
 
         private enum UpgradeFaction
