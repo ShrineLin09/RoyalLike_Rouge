@@ -164,6 +164,7 @@ namespace MatchRogue
         private int[,] iceHealth;
         private GameObject[,] iceOverlays;
         private readonly List<RogueUpgrade> activeUpgrades = new List<RogueUpgrade>();
+        private readonly Dictionary<UpgradeKind, int> upgradeLevels = new Dictionary<UpgradeKind, int>();
         private readonly HashSet<int> removedTileTypes = new HashSet<int>();
         private readonly Dictionary<Vector2Int, int> crateDamageBonuses = new Dictionary<Vector2Int, int>();
         private readonly Dictionary<UpgradeFaction, int> missedCoreFactionChoiceCounts = new Dictionary<UpgradeFaction, int>();
@@ -577,6 +578,7 @@ namespace MatchRogue
             room = 1;
             pendingRewardAfterRoom = 0;
             activeUpgrades.Clear();
+            upgradeLevels.Clear();
             removedTileTypes.Clear();
             crateDamageBonuses.Clear();
             missedCoreFactionChoiceCounts.Clear();
@@ -4140,7 +4142,7 @@ namespace MatchRogue
 
         private bool ApplyUpgradeSelection(RogueUpgrade upgrade)
         {
-            activeUpgrades.Add(upgrade);
+            AddOrUpgrade(upgrade);
             if (IsColorRemovalUpgrade(upgrade.Kind))
             {
                 removedTileTypes.Add(GetRemovedTileType(upgrade.Kind));
@@ -4155,12 +4157,25 @@ namespace MatchRogue
             return false;
         }
 
+        private int AddOrUpgrade(RogueUpgrade upgrade)
+        {
+            var currentLevel = GetUpgradeLevel(upgrade.Kind);
+            var nextLevel = Mathf.Clamp(currentLevel + 1, 1, upgrade.MaxLevel);
+            upgradeLevels[upgrade.Kind] = nextLevel;
+            if (currentLevel <= 0)
+            {
+                activeUpgrades.Add(upgrade);
+            }
+
+            return nextLevel;
+        }
+
         private bool GrantRandomUnlockedUpgrades(int count)
         {
             var needsBoardSettle = false;
             var candidates = GetAvailableUpgradePool(currentUpgradeChoiceCompletedRoom)
                 .Where(upgrade => upgrade.Kind != UpgradeKind.CardMaster)
-                .Where(upgrade => activeUpgrades.Count(owned => owned.Kind == upgrade.Kind) < upgrade.MaxLevel)
+                .Where(upgrade => GetUpgradeLevel(upgrade.Kind) < upgrade.MaxLevel)
                 .ToList();
             for (var i = 0; i < count && candidates.Count > 0; i++)
             {
@@ -4170,14 +4185,14 @@ namespace MatchRogue
                     break;
                 }
 
-                activeUpgrades.Add(picked);
+                AddOrUpgrade(picked);
                 if (IsColorRemovalUpgrade(picked.Kind))
                 {
                     removedTileTypes.Add(GetRemovedTileType(picked.Kind));
                     needsBoardSettle |= ClearRemovedColorTiles(GetRemovedTileType(picked.Kind));
                 }
 
-                candidates.RemoveAll(upgrade => upgrade.Kind == picked.Kind && activeUpgrades.Count(owned => owned.Kind == upgrade.Kind) >= upgrade.MaxLevel);
+                candidates.RemoveAll(upgrade => upgrade.Kind == picked.Kind && GetUpgradeLevel(upgrade.Kind) >= upgrade.MaxLevel);
             }
 
             return needsBoardSettle;
@@ -4636,7 +4651,7 @@ namespace MatchRogue
 
         private int GetUpgradeLevel(UpgradeKind kind)
         {
-            return activeUpgrades.Count(upgrade => upgrade.Kind == kind);
+            return upgradeLevels.TryGetValue(kind, out var level) ? level : 0;
         }
 
         private bool HasUpgrade(UpgradeKind kind)
@@ -4844,7 +4859,7 @@ namespace MatchRogue
                 completed = success,
                 reachedLevel = success ? RoomsPerRun : reachedRoom,
                 durationSeconds = Mathf.Max(0, (int)(endTime - runStartTime).TotalSeconds),
-                skillNames = activeUpgrades.Select(upgrade => upgrade.Name).ToArray(),
+                skillNames = activeUpgrades.Select(FormatOwnedUpgradeName).ToArray(),
                 levelRemainingMoves = levelRemainingMoves.Take(completedRooms).ToArray(),
                 rocketTriggerCount = rocketActivationCount,
                 bombTriggerCount = bombActivationCount,
@@ -4926,12 +4941,18 @@ namespace MatchRogue
                 return "- 无";
             }
 
-            return string.Join("\n", activeUpgrades.Select(upgrade => $"- {upgrade.Name}"));
+            return string.Join("\n", activeUpgrades.Select(upgrade => $"- {FormatOwnedUpgradeName(upgrade)}"));
         }
 
         private string FormatSkillNamesInline()
         {
-            return activeUpgrades.Count == 0 ? "无" : string.Join("、", activeUpgrades.Select(upgrade => upgrade.Name));
+            return activeUpgrades.Count == 0 ? "无" : string.Join("、", activeUpgrades.Select(FormatOwnedUpgradeName));
+        }
+
+        private string FormatOwnedUpgradeName(RogueUpgrade upgrade)
+        {
+            var level = GetUpgradeLevel(upgrade.Kind);
+            return upgrade.MaxLevel > 1 ? $"{upgrade.Name}{Mathf.Max(1, level)}" : upgrade.Name;
         }
 
         private string FormatRunStats(RunLeaderboardRecord record)
@@ -4982,9 +5003,7 @@ namespace MatchRogue
             return string.Join("\n", activeUpgrades
                 .GroupBy(upgrade => upgrade.Faction)
                 .Select(factionGroup => $"{GetFactionLabel(factionGroup.Key)} " +
-                    string.Join("、", factionGroup
-                        .GroupBy(upgrade => upgrade.Name)
-                        .Select(group => group.Count() > 1 ? $"{group.Key} Lv.{group.Count()}" : group.Key))));
+                    string.Join("、", factionGroup.Select(FormatOwnedUpgradeName))));
         }
 
         private string GetRoomGoalText()
